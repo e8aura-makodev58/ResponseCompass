@@ -1,63 +1,12 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark">
-    <title>Response Compass</title>
-    <link rel="stylesheet" href="/app.css">
-  </head>
-  <body>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Synthetic manufacturing control room</p>
-        <h1>Response Compass</h1>
-      </div>
-      <div class="header-actions">
-        <label class="room-label" for="room-picker">Control Room</label>
-        <select id="room-picker" aria-label="Control Room"></select>
-        <span class="mode-badge">Deterministic fallback</span>
-      </div>
-    </header>
-
-    <main>
-      <p id="status" class="status" role="status" aria-live="polite">Loading Control Rooms…</p>
-      <section id="room-summary" class="summary" aria-label="Selected Control Room"></section>
-      <div class="layout">
-        <section class="panel floor-panel" aria-labelledby="floor-heading">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Live Floor</p>
-              <h2 id="floor-heading">Manufacturing Floor</h2>
-            </div>
-            <button id="offer-next" class="primary">Offer next issue</button>
-          </div>
-          <p class="help">Select an active station to inspect its issue. Offers use the next deterministic queue item.</p>
-          <div id="floor" class="floor" aria-label="Station map"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="station-heading">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Dispatch</p>
-              <h2 id="station-heading">Station Status</h2>
-            </div>
-          </div>
-          <div id="station-status" class="station-status" aria-live="polite"></div>
-        </section>
-
-        <section class="panel events-panel" aria-labelledby="event-heading">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Public-safe audit</p>
-              <h2 id="event-heading">Operational Event Feed</h2>
-            </div>
-          </div>
-          <ol id="events" class="events"></ol>
-        </section>
-      </div>
-    </main>
-    <template id="empty-state"><p class="empty">No active work at this station.</p></template>
-    <script type="module" src="/app.js"></script>
-  </body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Response Compass</title><link rel="stylesheet" href="/app.css"></head><body>
+  <header class="topbar"><div><p class="eyebrow">Synthetic manufacturing control room</p><h1>Response Compass</h1></div><div class="header-actions"><label class="room-label" for="room-picker">Control Room</label><select id="room-picker" aria-label="Control Room"></select><span class="mode-badge">Deterministic fallback</span></div></header>
+  <main><p id="status" class="status" role="status" aria-live="polite">Loading Control Rooms…</p><section id="room-summary" class="summary" aria-label="Selected Control Room"></section><div class="layout">
+    <section class="panel floor-panel" aria-labelledby="floor-heading"><div class="panel-heading"><div><p class="eyebrow">Live Floor</p><h2 id="floor-heading">Manufacturing Floor</h2></div><button id="offer-next" class="primary">Offer next issue</button></div>
+      <div class="floor-toolbar"><label for="floor-picker">Floor</label><select id="floor-picker" aria-label="Floor"></select><div class="zoom-controls" aria-label="Viewport zoom"><button id="zoom-out" type="button">−</button><span id="zoom-label">100%</span><button id="zoom-in" type="button">+</button><button id="reset-focus" type="button">Reset focus</button></div></div>
+      <p class="help">Explicit controls keep the synthetic floor stable. Select a station or neutral personnel marker to inspect it.</p><div id="floor-viewport" class="floor-viewport" aria-live="polite"></div>
+      <div class="floor-tabs" role="tablist" aria-label="Floor lists"><button id="tab-stations" type="button" role="tab" aria-controls="floor-list">Stations</button><button id="tab-personnel" type="button" role="tab" aria-controls="floor-list">Shift Personnel</button></div><div id="floor-list" class="floor-list" role="tabpanel"></div>
+    </section>
+    <section class="panel" aria-labelledby="station-heading"><div class="panel-heading"><div><p class="eyebrow">Dispatch</p><h2 id="station-heading">Station Status</h2></div></div><div id="station-status" class="station-status" aria-live="polite"></div></section>
+    <section class="panel events-panel" aria-labelledby="event-heading"><div class="panel-heading"><div><p class="eyebrow">Public-safe audit</p><h2 id="event-heading">Operational Event Feed</h2></div></div><ol id="events" class="events"></ol></section>
+  </div></main><script type="module" src="/app.js"></script></body></html>
