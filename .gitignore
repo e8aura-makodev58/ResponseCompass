@@ -4,3 +4,4 @@ data/
 *.log
 .env
 .env.*
+plant*-simulation-seed.json

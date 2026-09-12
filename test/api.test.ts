@@ -25,7 +25,11 @@ describe('room API contract', () => {
   it('serves the bundled operator interface without an external dependency', async () => {
     const response = await fetch(`${app.baseUrl}/`);
     assert.equal(response.status, 200);
-    assert.match(await response.text(), /Response Compass/);
+    const page = await response.text();
+    assert.match(page, /Response Compass/);
+    assert.match(page, /id="floor-picker"/);
+    assert.match(page, /id="tab-personnel"/);
+    assert.match(page, /id="reset-focus"/);
   });
 
   it('returns 404 for an unknown room and 404 for an unknown endpoint', async () => {
