@@ -101,3 +101,25 @@ The revised implementation order is:
 6. **Case evidence, providers, and API Settings:** resume only after deterministic case/dispatch behavior is proven. Provider credentials and a settings page are not prerequisites for the provider-free first live test.
 
 Developer agents must wait for a new explicit, bounded delegation aligned to this order. They must not self-select an item from this list.
+
+## Active delegated work — supersedes parked assignments
+
+### Developer 1 — Manufacturing Floor viewport
+
+**Branch:** `feature/developer-1-floor-viewport` (created by the main developer from current `develop`).
+
+Own the Live Floor viewport only. Replace the thin station grid with a floor-aware, deliberate operator viewport that consumes existing public room APIs: floor selection, station/equipment state, active issue and assignment visibility, safe station/issue focus, selected-station preservation, and clear neutral/default personnel presentation where personnel are rendered. Keep the current dispatch controls functional. Do not implement simulation ticks, issue generation/resolution, staffing/calendar policy, analytics, provider settings, Docker/Compose, or private-state access.
+
+Acceptance evidence: `npm test` passes; the UI remains provider-free; room switching does not leak selection/state between rooms; selected station/issue focuses the correct floor; no browser code gains hidden/private fields. Record any public API or shared UI-state contract change in `handover.md` before implementation.
+
+### Developer 2 — Simulation and issue lifecycle
+
+**Branch to create after reading this file:** `feature/developer-2-simulation-lifecycle` from latest `origin/develop`.
+
+Own the shared operational core: persisted simulation clock, pause/resume and safe trigger actions, deterministic event generation fallback, and the issue lifecycle through assignment attempt, deterministic resolution/failure/reopen, and public-safe events/audits. Scheduled and forced triggers must share validation and must not duplicate events or mutate hidden truth into public state. Use existing room revision protection and the same domain mutation paths; do not implement/rework the floor viewport, workforce policy, analytics, settings/providers, or deployment assets.
+
+Acceptance evidence: `npm test` passes; paused time does not advance; restart resumes stored simulated time without wall-clock catch-up; trigger actions fire once; successful/failing outcomes follow one lifecycle path; invalid/stale mutations leave canonical state valid; all public API/event/audit payloads remain hidden-skill-free. Append a task claim before work, then push only this feature branch for main-developer acceptance.
+
+The earlier `feature/developer-1-api-settings` branch remains parked and must not receive work. The previously proposed Developer 2 container branch must not be created.
+
+- **2026-09-12 — Main developer (Codex):** Activated swapped implementation delegations: Developer 1 owns the Manufacturing Floor viewport on `feature/developer-1-floor-viewport`; Developer 2 owns simulation/issue lifecycle on `feature/developer-2-simulation-lifecycle`. These are the only currently authorized implementation scopes.
