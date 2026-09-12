@@ -12,6 +12,22 @@ async function main(): Promise<void> {
   const registry = await RoomRegistry.open(paths);
 
   const server = createApp({ config, registry });
+  // Bind failures are operational configuration errors, not uncaught process
+  // crashes. The default port may already host another local application.
+  server.once('error', (error: NodeJS.ErrnoException) => {
+    const message = error.code === 'EADDRINUSE'
+      ? `Port ${config.port} is already in use. Stop that service or start Response Compass with PORT=<unused-port> npm start.`
+      : `Unable to listen on ${config.host}:${config.port}.`;
+    process.stderr.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: 'fatal',
+        code: error.code ?? 'LISTEN_FAILED',
+        message,
+      })}\n`,
+    );
+    process.exit(1);
+  });
   server.listen(config.port, config.host, () => {
     process.stdout.write(
       `${JSON.stringify({

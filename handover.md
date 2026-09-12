@@ -80,3 +80,7 @@ Append chronological entries beneath this line. Do not modify earlier entries.
   - **Next exact action:** Implement Lane E to containerize and deploy this working Live Floor, then Lane D to add safe paused/resume/trigger simulation controls through the shared domain paths.
 
 - **2026-09-12 — Codex (GPT-5.6) — Collaboration decision (affects: all contributors; no runtime migration):** `develop` is the live integration/deployment branch. `main` remains the protected stable baseline. Human contributors use short-lived feature branches from `origin/develop`, provide test-backed handoff entries in `COLLABORATION.md`, and merge only after main-developer acceptance. `handover.md` continues to document cross-agent contracts and technical decisions.
+
+- **2026-09-12 — Codex (GPT-5.6) — Local startup fix:** Default port `8080` was already occupied by a pre-existing process in this workspace. Response Compass itself verified healthy at `http://127.0.0.1:8081`. Startup now handles bind failures and prints a safe recovery command (`PORT=<unused-port> npm start`) rather than raising an unhandled Node error. Verification pending full suite after this small operational change.
+
+- **2026-09-12 — Codex (GPT-5.6) — Local startup fix verification:** `npm test` passed 31/31 and `git diff --check` passed after the bind-error handling change. The service health endpoint and operator UI both returned HTTP 200 on port `8081`; port `8080` remains intentionally untouched because it belongs to an already-running process.
