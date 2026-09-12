@@ -70,8 +70,8 @@
                 <button id="reset-focus" type="button">Reset focus</button>
               </div>
             </div>
-            <p class="help">Explicit controls keep the synthetic floor stable. Select a station or neutral personnel marker to inspect it.</p>
-            <div id="floor-viewport" class="floor-viewport" aria-live="polite"></div>
+            <p id="floor-help" class="help">Drag empty floor space to pan. Focus the viewport and use arrow keys to pan or +/− to zoom. The ordinary mouse wheel remains page navigation.</p>
+            <div id="floor-viewport" class="floor-viewport" tabindex="0" aria-describedby="floor-help" aria-label="Interactive manufacturing floor viewport"></div>
             <div class="floor-tabs" role="tablist" aria-label="Floor lists">
               <button id="tab-stations" type="button" role="tab" aria-controls="floor-list">Stations</button>
               <button id="tab-personnel" type="button" role="tab" aria-controls="floor-list">Shift Personnel</button>

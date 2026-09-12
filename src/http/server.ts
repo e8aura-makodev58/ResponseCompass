@@ -84,7 +84,7 @@ async function handle(
   const segments = url.pathname.split('/').filter((segment) => segment !== '');
   const method = req.method ?? 'GET';
 
-  if (method === 'GET' && (url.pathname === '/' || url.pathname === '/app.js' || url.pathname === '/app.css')) {
+  if (method === 'GET' && (url.pathname === '/' || url.pathname === '/app.js' || url.pathname === '/app.css' || url.pathname === '/projection.js')) {
     return serveStatic(res, url.pathname);
   }
 
@@ -389,7 +389,7 @@ function readProvider(body: Record<string, unknown>) {
 }
 
 /** The operator UI is bundled with this process; no CDN or provider call is needed. */
-async function serveStatic(res: ServerResponse, pathname: '/' | '/app.js' | '/app.css'): Promise<void> {
+async function serveStatic(res: ServerResponse, pathname: '/' | '/app.js' | '/app.css' | '/projection.js'): Promise<void> {
   const filename = pathname === '/' ? 'index.html' : pathname.slice(1);
   const contentType = filename.endsWith('.js')
     ? 'text/javascript; charset=utf-8'
