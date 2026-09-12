@@ -3,6 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import type { RoomHealth, RoomSummary } from '../domain/types.js';
 import type { RoomSeedSpec } from '../seed/seed.js';
 import { seedRoom } from '../seed/seed.js';
+import { loadPlant1Seed } from '../seed/plant1.js';
 import { writeJsonIfAbsent } from './atomic.js';
 import { DataPaths, isValidRoomId } from './paths.js';
 import { RoomStore } from './roomStore.js';
@@ -41,11 +42,14 @@ export class RoomRegistry {
   static async seedIfEmpty(
     paths: DataPaths,
     specs: RoomSeedSpec[],
+    plant1SimulationSeedPath?: string,
   ): Promise<boolean> {
     if (await pathExists(paths.roomsDir)) return false;
 
     for (const spec of specs) {
-      const { state, hidden } = seedRoom(spec);
+      const { state, hidden } = spec.roomId === 'plant-1' && plant1SimulationSeedPath !== undefined
+        ? await loadPlant1Seed(plant1SimulationSeedPath)
+        : seedRoom(spec);
       await writeJsonIfAbsent(paths.roomStateFile(spec.roomId), state);
       await writeJsonIfAbsent(paths.roomHiddenFile(spec.roomId), hidden);
     }
