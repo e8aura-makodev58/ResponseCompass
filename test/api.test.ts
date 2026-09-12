@@ -31,7 +31,10 @@ describe('room API contract', () => {
     assert.match(page, /id="nav-analytics"/);
     assert.match(page, /id="nav-settings"/);
     assert.match(page, /Canonical operational metrics and drill-downs/);
-    assert.match(page, /Deployment-global API configuration/);
+    assert.match(page, /id="settings-api"/);
+    assert.match(page, /id="openai-api-key"/);
+    assert.match(page, /id="openrouter-api-key"/);
+    assert.match(page, /data-provider-action="save"/);
     assert.match(page, /id="pause-simulation"/);
     assert.match(page, /id="resume-simulation"/);
     assert.match(page, /id="trigger-event"/);

@@ -9,12 +9,13 @@ import { dirname, join } from 'node:path';
 export async function writeFileAtomic(
   filePath: string,
   contents: string,
+  mode?: number,
 ): Promise<void> {
   const dir = dirname(filePath);
   await mkdir(dir, { recursive: true });
   const tempPath = join(dir, `.${Date.now()}-${process.pid}.tmp`);
 
-  const handle = await open(tempPath, 'w');
+  const handle = await open(tempPath, 'w', mode);
   try {
     await handle.writeFile(contents, 'utf8');
     // Flush the bytes before the rename, so the rename cannot expose an empty
@@ -47,6 +48,14 @@ export async function writeJsonAtomic(
   value: unknown,
 ): Promise<void> {
   await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Atomic JSON write whose resulting file is readable/writable by its owner only. */
+export async function writePrivateJsonAtomic(
+  filePath: string,
+  value: unknown,
+): Promise<void> {
+  await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`, 0o600);
 }
 
 /** Write only if the path does not already exist. Never merges or overwrites. */

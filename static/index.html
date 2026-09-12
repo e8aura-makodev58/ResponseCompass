@@ -109,12 +109,70 @@
         </div>
       </section>
 
-      <section id="page-settings" class="app-page placeholder-page" role="tabpanel" aria-labelledby="nav-settings" hidden>
-        <div class="placeholder-card">
-          <p class="eyebrow">Reserved workspace</p>
-          <h2>Settings</h2>
-          <p>Deployment-global API configuration and room-scoped demo controls will be added here in later verified slices.</p>
+      <section id="page-settings" class="app-page settings-page" role="tabpanel" aria-labelledby="nav-settings" hidden>
+        <div class="settings-heading">
+          <div>
+            <p class="eyebrow">Deployment-global configuration</p>
+            <h2>Settings</h2>
+          </div>
+          <div id="compass-provider-summary" class="compass-summary">Compass uses deterministic fallback.</div>
         </div>
+        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button class="active" type="button" role="tab" aria-selected="true" aria-controls="settings-api">API</button>
+          <button type="button" role="tab" aria-selected="false" disabled>Demo</button>
+        </div>
+        <section id="settings-api" class="settings-api" role="tabpanel">
+          <p id="settings-status" class="status" role="status" aria-live="polite">Loading provider settings…</p>
+          <div class="provider-grid">
+            <article class="provider-card" data-provider="openai">
+              <div class="provider-heading">
+                <div>
+                  <p class="eyebrow">Provider</p>
+                  <h3>OpenAI</h3>
+                </div>
+                <span id="openai-configured" class="provider-state">Not configured</span>
+              </div>
+              <p class="provider-meta" id="openai-credential-meta">No API key saved.</p>
+              <label for="openai-api-key">New or replacement API key</label>
+              <div class="credential-row">
+                <input id="openai-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a write-only key">
+                <button class="primary" type="button" data-provider-action="save" data-provider="openai">Save and validate</button>
+              </div>
+              <p class="help">The key is sent only to the server and is never returned to this browser.</p>
+              <label for="openai-model">Compass model</label>
+              <select id="openai-model" class="model-picker" disabled></select>
+              <div class="provider-actions">
+                <button type="button" data-provider-action="select" data-provider="openai" disabled>Use for Compass</button>
+                <button type="button" data-provider-action="refresh" data-provider="openai" disabled>Refresh models</button>
+                <button class="danger" type="button" data-provider-action="remove" data-provider="openai" disabled>Remove saved key</button>
+              </div>
+            </article>
+
+            <article class="provider-card" data-provider="openrouter">
+              <div class="provider-heading">
+                <div>
+                  <p class="eyebrow">Provider</p>
+                  <h3>OpenRouter</h3>
+                </div>
+                <span id="openrouter-configured" class="provider-state">Not configured</span>
+              </div>
+              <p class="provider-meta" id="openrouter-credential-meta">No API key saved.</p>
+              <label for="openrouter-api-key">New or replacement API key</label>
+              <div class="credential-row">
+                <input id="openrouter-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a write-only key">
+                <button class="primary" type="button" data-provider-action="save" data-provider="openrouter">Save and validate</button>
+              </div>
+              <p class="help">Only text-output models returned for this key are offered for selection.</p>
+              <label for="openrouter-model">Compass model</label>
+              <select id="openrouter-model" class="model-picker" disabled></select>
+              <div class="provider-actions">
+                <button type="button" data-provider-action="select" data-provider="openrouter" disabled>Use for Compass</button>
+                <button type="button" data-provider-action="refresh" data-provider="openrouter" disabled>Refresh models</button>
+                <button class="danger" type="button" data-provider-action="remove" data-provider="openrouter" disabled>Remove saved key</button>
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 

@@ -8,6 +8,8 @@ export type ErrorCode =
   | 'STALE_REVISION'
   | 'CONFLICT'
   | 'ROOM_UNAVAILABLE'
+  | 'INVALID_CREDENTIAL'
+  | 'PROVIDER_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -20,6 +22,8 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   STALE_REVISION: 409,
   CONFLICT: 409,
   ROOM_UNAVAILABLE: 503,
+  INVALID_CREDENTIAL: 400,
+  PROVIDER_UNAVAILABLE: 502,
   INTERNAL_ERROR: 500,
 };
 

@@ -14,6 +14,9 @@ import {
 import { pauseClock, resumeClock, triggerNextEvent } from '../domain/clock.js';
 import { resolveAssignment } from '../domain/lifecycle.js';
 import type { AppConfig } from '../config.js';
+import { isProviderId } from '../providers/catalog.js';
+import { ProviderSettingsStore } from '../providers/settingsStore.js';
+import { DataPaths } from '../store/paths.js';
 import type { RoomEntry, RoomRegistry } from '../store/registry.js';
 import { StaleRevisionError } from '../store/roomStore.js';
 import { ApiError } from './errors.js';
@@ -24,12 +27,24 @@ export interface ServerDeps {
   registry: RoomRegistry;
   /** Structured request logging; never receives a body or a credential. */
   log?: (line: Record<string, string | number>) => void;
+  providerSettings?: ProviderSettingsStore;
 }
 
-export function createApp({ config, registry, log = defaultLog }: ServerDeps): Server {
+export function createApp({
+  config,
+  registry,
+  log = defaultLog,
+  providerSettings = new ProviderSettingsStore(
+    new DataPaths(config.dataRoot),
+    {
+      ...(process.env['OPENAI_API_KEY'] ? { openai: process.env['OPENAI_API_KEY'] } : {}),
+      ...(process.env['OPENROUTER_API_KEY'] ? { openrouter: process.env['OPENROUTER_API_KEY'] } : {}),
+    },
+  ),
+}: ServerDeps): Server {
   return createServer((req, res) => {
     const startedAt = Date.now();
-    handle(req, res, config, registry)
+    handle(req, res, config, registry, providerSettings)
       .catch((error: unknown) => {
         const apiError = toApiError(error);
         if (apiError.status >= 500) {
@@ -55,6 +70,7 @@ async function handle(
   res: ServerResponse,
   config: AppConfig,
   registry: RoomRegistry,
+  providerSettings: ProviderSettingsStore,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const segments = url.pathname.split('/').filter((segment) => segment !== '');
@@ -66,6 +82,10 @@ async function handle(
 
   if (segments[0] === 'health' && segments.length === 1) {
     return handleHealth(req, res, config, registry);
+  }
+
+  if (segments[0] === 'api' && segments[1] === 'settings') {
+    return handleProviderSettings(req, res, segments, providerSettings);
   }
 
   if (segments[0] !== 'api' || segments[1] !== 'rooms') {
@@ -222,6 +242,65 @@ async function handle(
   }
 
   throw new ApiError('NOT_FOUND', 'Unknown endpoint.');
+}
+
+async function handleProviderSettings(
+  req: IncomingMessage,
+  res: ServerResponse,
+  segments: string[],
+  settings: ProviderSettingsStore,
+): Promise<void> {
+  const method = req.method ?? 'GET';
+
+  if (segments.length === 3 && segments[2] === 'providers') {
+    requireMethod(method, ['GET']);
+    return sendJson(res, 200, await settings.publicSettings());
+  }
+
+  if (segments.length === 3 && segments[2] === 'compass') {
+    requireMethod(method, ['POST']);
+    const body = await readJsonBody(req);
+    const provider = readProvider(body);
+    const model = readString(body, 'model', { maxLength: 200 });
+    return sendJson(res, 200, await settings.selectCompass(provider, model));
+  }
+
+  if (segments[2] !== 'providers' || segments.length < 5) {
+    throw new ApiError('NOT_FOUND', 'Unknown settings endpoint.');
+  }
+  const provider = segments[3] as string;
+  if (!isProviderId(provider)) {
+    throw new ApiError('VALIDATION_FAILED', 'Unsupported provider.');
+  }
+
+  if (segments.length === 5 && segments[4] === 'credential') {
+    requireMethod(method, ['POST', 'DELETE']);
+    if (method === 'DELETE') {
+      return sendJson(res, 200, await settings.removeCredential(provider));
+    }
+    const body = await readJsonBody(req);
+    const apiKey = readString(body, 'apiKey', { maxLength: 4_096 });
+    return sendJson(res, 200, await settings.saveCredential(provider, apiKey));
+  }
+
+  if (
+    segments.length === 6 &&
+    segments[4] === 'models' &&
+    segments[5] === 'refresh'
+  ) {
+    requireMethod(method, ['POST']);
+    return sendJson(res, 200, await settings.refreshModels(provider));
+  }
+
+  throw new ApiError('NOT_FOUND', 'Unknown settings endpoint.');
+}
+
+function readProvider(body: Record<string, unknown>) {
+  const provider = readString(body, 'provider', { maxLength: 40 });
+  if (!isProviderId(provider)) {
+    throw new ApiError('VALIDATION_FAILED', 'Unsupported provider.');
+  }
+  return provider;
 }
 
 /** The operator UI is bundled with this process; no CDN or provider call is needed. */

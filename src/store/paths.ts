@@ -40,4 +40,18 @@ export class DataPaths {
   roomTransactionFile(roomId: string): string {
     return join(this.roomDir(roomId), 'transaction.json');
   }
+
+  get providerSettingsFile(): string {
+    return join(this.dataRoot, 'provider-settings.json');
+  }
+
+  /** Owner-restricted provider secrets; never served or projected. */
+  get providerCredentialsFile(): string {
+    return join(this.dataRoot, 'provider-credentials.json');
+  }
+
+  /** Owner-restricted recovery journal; may transiently contain credentials. */
+  get providerTransactionFile(): string {
+    return join(this.dataRoot, 'provider-transaction.json');
+  }
 }

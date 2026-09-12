@@ -1,4 +1,4 @@
-const state = { rooms: [], room: null, selectedStationId: null, selectedResponderId: null, selectedFloorId: null, activePage: 'production-floor', activeTab: 'stations', zoom: 1, lastRecommendation: null, busy: false };
+const state = { rooms: [], room: null, selectedStationId: null, selectedResponderId: null, selectedFloorId: null, activePage: 'production-floor', activeTab: 'stations', zoom: 1, lastRecommendation: null, providerSettings: null, settingsBusy: false, busy: false };
 const $ = (id) => document.getElementById(id);
 const status = $('status');
 const ACTIVE_ISSUE_STATUSES = new Set(['PENDING', 'OFFER_PENDING', 'ASSIGNED', 'REOPENED']);
@@ -8,7 +8,7 @@ function text(node, value) { node.textContent = value; return node; }
 function element(name, className) { const node = document.createElement(name); if (className) node.className = className; return node; }
 function roomUrl(path = '') { return `/api/rooms/${encodeURIComponent(state.room.roomId)}${path}`; }
 function updateLocation() { if (!state.room) return; const params = new URLSearchParams({ room: state.room.roomId, view: state.activePage }); history.replaceState(null, '', `#${params}`); }
-function selectPage(page, moveFocus = false) { if (!APP_PAGES.includes(page)) return; state.activePage = page; for (const candidate of APP_PAGES) { const active = candidate === page; const tab = $(`nav-${candidate}`); tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1; $(`page-${candidate}`).hidden = !active; } updateLocation(); if (moveFocus) $(`nav-${page}`).focus(); }
+function selectPage(page, moveFocus = false) { if (!APP_PAGES.includes(page)) return; state.activePage = page; for (const candidate of APP_PAGES) { const active = candidate === page; const tab = $(`nav-${candidate}`); tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1; $(`page-${candidate}`).hidden = !active; } updateLocation(); if (page === 'settings' && state.providerSettings === null && !state.settingsBusy) void loadProviderSettings(); if (moveFocus) $(`nav-${page}`).focus(); }
 function compareIssues(a, b) { return a.raisedAt.localeCompare(b.raisedAt) || a.id.localeCompare(b.id); }
 function activeIssueForStation(room, stationId) { return room.issues.filter((issue) => issue.stationId === stationId && ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0] || null; }
 function stationStatus(room, station) { return activeIssueForStation(room, station.id) ? 'ISSUE ACTIVE' : 'HEALTHY'; }
@@ -34,6 +34,89 @@ function renderRecommendation(box, recommendation) { const wrap = element('div',
 function renderOffer(box, room, offer) { const responder = room.responders.find((candidate) => candidate.id === offer.responderId); const wrap = element('div', 'offer'); wrap.append(text(element('strong'), `Offer pending: ${responder?.displayName || offer.responderId}`), text(element('p', 'meta'), 'Assignment occurs only after acceptance.')); const actions = element('div', 'offer-actions'); actions.append(actionButton('Accept offer', () => mutate(`/offers/${encodeURIComponent(offer.id)}/accept`, {}), 'primary'), actionButton('Reject offer', () => mutate(`/offers/${encodeURIComponent(offer.id)}/reject`, {}), 'danger')); const available = room.responders.filter((candidate) => candidate.dutyStatus === 'AVAILABLE'); if (available.length) { const override = element('div', 'override'); const select = element('select'); for (const candidate of available) { const option = element('option'); option.value = candidate.id; option.textContent = `Override to ${candidate.displayName}`; select.append(option); } override.append(select, actionButton('Override', () => mutate(`/offers/${encodeURIComponent(offer.id)}/override`, { responderId: select.value }))); wrap.append(actions, override); } else wrap.append(actions); box.append(wrap); }
 function actionButton(label, onClick, className = '') { const button = text(element('button', className), label); button.type = 'button'; button.disabled = state.busy; button.addEventListener('click', onClick); return button; }
 function renderEvents(room) { const list = $('events'); list.replaceChildren(); for (const event of [...room.events].reverse().slice(0, 25)) { const item = element('li'); item.append(text(element('span', 'event-type'), event.type.replaceAll('_', ' ')), text(element('span', 'event-time'), new Date(event.occurredAt).toLocaleString())); list.append(item); } }
+function setSettingsStatus(message, error = false) { const node = $('settings-status'); node.textContent = message; node.classList.toggle('error', error); }
+async function loadProviderSettings() { state.settingsBusy = true; setSettingsStatus('Loading provider settings…'); try { state.providerSettings = await request('/api/settings/providers'); renderProviderSettings(); setSettingsStatus('Provider settings loaded.'); } catch (error) { setSettingsStatus(error instanceof Error ? error.message : 'Provider settings could not be loaded.', true); } finally { state.settingsBusy = false; if (state.providerSettings) renderProviderSettings(); } }
+function renderProviderSettings() {
+  const settings = state.providerSettings;
+  if (!settings) return;
+  $('compass-provider-summary').textContent = settings.compass
+    ? `Compass provider: ${settings.compass.provider === 'openai' ? 'OpenAI' : 'OpenRouter'} · ${settings.compass.model}`
+    : 'Compass uses deterministic fallback.';
+  for (const provider of settings.providers) {
+    const badge = $(`${provider.id}-configured`);
+    badge.textContent = provider.configured ? 'Configured' : 'Not configured';
+    badge.classList.toggle('configured', provider.configured);
+    $(`${provider.id}-credential-meta`).textContent = provider.configured
+      ? `${provider.credentialSource === 'SETTINGS' ? 'Saved key' : 'Environment key'} · ${provider.maskedEnding}${provider.refreshedAt ? ` · models refreshed ${new Date(provider.refreshedAt).toLocaleString()}` : ''}`
+      : 'No API key configured.';
+    const picker = $(`${provider.id}-model`);
+    const previous = settings.compass?.provider === provider.id ? settings.compass.model : picker.value;
+    picker.replaceChildren();
+    if (provider.models.length === 0) {
+      const option = element('option');
+      option.value = '';
+      option.textContent = provider.configured ? 'Refresh to load models' : 'Save a valid key first';
+      picker.append(option);
+    } else {
+      for (const model of provider.models) {
+        const option = element('option');
+        option.value = model.id;
+        option.textContent = model.name === model.id ? model.id : `${model.name} · ${model.id}`;
+        picker.append(option);
+      }
+      if (provider.models.some((model) => model.id === previous)) picker.value = previous;
+    }
+    picker.disabled = state.settingsBusy || provider.models.length === 0;
+    const card = document.querySelector(`.provider-card[data-provider="${provider.id}"]`);
+    card.querySelector('[data-provider-action="save"]').disabled = state.settingsBusy;
+    card.querySelector('[data-provider-action="select"]').disabled = state.settingsBusy || provider.models.length === 0;
+    card.querySelector('[data-provider-action="refresh"]').disabled = state.settingsBusy || !provider.configured;
+    card.querySelector('[data-provider-action="remove"]').disabled = state.settingsBusy || provider.credentialSource !== 'SETTINGS';
+  }
+}
+async function providerAction(providerId, action) {
+  if (state.settingsBusy) return;
+  state.settingsBusy = true;
+  renderProviderSettings();
+  setSettingsStatus(action === 'save' ? 'Validating key and loading models…' : 'Updating provider settings…');
+  const input = $(`${providerId}-api-key`);
+  try {
+    if (action === 'save') {
+      const apiKey = input.value;
+      if (!apiKey.trim()) throw new Error('Enter an API key.');
+      state.providerSettings = await request(`/api/settings/providers/${providerId}/credential`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+      });
+      setSettingsStatus('API key validated and model catalog loaded.');
+    } else if (action === 'refresh') {
+      state.providerSettings = await request(`/api/settings/providers/${providerId}/models/refresh`, { method: 'POST' });
+      setSettingsStatus('Model catalog refreshed.');
+    } else if (action === 'remove') {
+      if (!confirm('Remove the settings-managed API key?')) {
+        setSettingsStatus('Removal cancelled.');
+        return;
+      }
+      state.providerSettings = await request(`/api/settings/providers/${providerId}/credential`, { method: 'DELETE' });
+      setSettingsStatus('Settings-managed API key removed.');
+    } else if (action === 'select') {
+      const model = $(`${providerId}-model`).value;
+      state.providerSettings = await request('/api/settings/compass', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: providerId, model }),
+      });
+      setSettingsStatus('Compass provider and model saved.');
+    }
+  } catch (error) {
+    setSettingsStatus(error instanceof Error ? error.message : 'Provider settings could not be updated.', true);
+  } finally {
+    input.value = '';
+    state.settingsBusy = false;
+    renderProviderSettings();
+  }
+}
 async function mutate(path, extra) {
   if (state.busy || !state.room) return;
   state.busy = true;
@@ -72,6 +155,9 @@ $('force-resolve').addEventListener('click', () => {
   const assignment = selectedAssignment(state.room);
   if (assignment) mutate(`/assignments/${encodeURIComponent(assignment.id)}/resolve`, {});
 });
+for (const button of document.querySelectorAll('[data-provider-action]')) {
+  button.addEventListener('click', () => providerAction(button.dataset.provider, button.dataset.providerAction));
+}
 for (const tab of document.querySelectorAll('.primary-tab')) {
   tab.addEventListener('click', () => selectPage(tab.dataset.page));
   tab.addEventListener('keydown', (event) => {
