@@ -59,6 +59,24 @@ Append chronological entries beneath this line. Do not modify earlier entries.
     5. Each `RoomStore` caches room state in-process. Correct for a single process; a second writer against the same data root would corrupt state. Single-writer is currently an assumption, not an enforced lock — Lane E should not scale the container beyond one replica.
   - **Next exact action:** claim **Lane B** and implement `POST /api/rooms/:roomId/offers` — deterministic next-issue selection, bounded eligible-candidate packet, ranked offer — then accept/reject/override, each routed through `RoomStore.mutate(expectedRevision, ...)`. Candidate packets must exclude hidden skill, responder coordinates, and availability fields (SOW §6). Lane E may run in parallel against the existing `/health` and `DATA_ROOT` contract.
 
+- **2026-09-12 — Developer 2 (GitHub Copilot / Claude Sonnet 4.6) — Shared operational core (clock, trigger, lifecycle):**
+  - **Scope completed:** Simulation clock control, deterministic event trigger, and issue lifecycle through assignment resolution. Branch `feature/developer-2-simulation-lifecycle`, commit `8eef605`.
+  - **Files added:** `src/domain/clock.ts`, `src/domain/lifecycle.ts`, `test/simulation.test.ts`.
+  - **Files modified:** `src/store/roomStore.ts` (additive — `mutateWithHidden`), `src/http/server.ts` (four new endpoints).
+  - **New endpoints:** `POST /api/rooms/:roomId/pause`, `POST /api/rooms/:roomId/resume`, `POST /api/rooms/:roomId/trigger`, `POST /api/rooms/:roomId/assignments/:assignmentId/resolve`. All accept `expectedRevision`; stale revision returns `409 STALE_REVISION`.
+  - **Design decisions:**
+    - `triggerNextEvent` uses `RoomStore.mutateWithHidden` (new) so the `HiddenRoomTruth.randomStream.cursor` is written atomically with the public state in the same queue lock. This prevents a crash between the two writes from leaving a stale cursor.
+    - `simulatedAt` advances on every trigger regardless of `clockState`. Trigger is an explicit operator action; it is not a scheduler tick driven by wall-clock time. A paused room can still be manually advanced.
+    - Priority is recomputed only for `PENDING` issues on each tick; `OFFER_PENDING` and `ASSIGNED` issues have already entered dispatch and their priority scores are not used for re-ranking.
+    - `resolveAssignment` reverts the station to `NORMAL` only when no other active issues (`PENDING`, `OFFER_PENDING`, or `ASSIGNED`) remain for that station.
+  - **Constraints preserved:** No frozen contract field was added, renamed, or removed. `schemaVersion` stays at 1. `ResponderSkill` and the random-stream cursor remain server-only; they are never placed on a public payload, log, event, or audit narrative.
+  - **Verification:** `npm test` → **45/45 pass** (19 new tests; 26 prior tests unchanged). Hermetic: temp data root, no network, providers disabled.
+  - **Known limitations for the next owner:**
+    1. The ten-actionable-issue cap (SOW §5.3) is not enforced. Repeated triggers accumulate issues without bound.
+    2. Issue reopen (`REOPENED` status) is not implemented; resolution is final for now. Lane F owns reopen logic.
+    3. There is no automatic scheduler tick; `RUNNING` clock state is recorded but does not drive wall-clock-based ticks. Scheduler automation remains Lane D.
+  - **Next exact action:** Merge `feature/developer-2-simulation-lifecycle` to `develop` after main-developer acceptance, then proceed to the **Live Floor viewport** (Developer 1, `feature/developer-1-floor-viewport`) which can now consume resolved/triggered issues from this operational core.
+
 ## Append-only updates
 
 - **2026-09-12 — Codex (GPT-5.6) — Lane B decision (affects: lanes C, D, G; additive API, no schema migration):** Added dispatch endpoints: `POST /api/rooms/:roomId/offers`, plus `POST /api/rooms/:roomId/offers/:offerId/{accept,reject,override}`. All use the existing `expectedRevision` envelope. Offer creation returns a bounded deterministic-fallback recommendation packet containing responder ID/name, distance, travel time, zero/null observed-history fields, and `NONE` evidence; it excludes responder coordinates, availability, assignments, hidden skill, and the persisted ranked queue. The persisted `Offer.rankedCandidateIds` remains server-only. Rejection advances through each candidate no more than once before returning the issue to `PENDING`. This is additive to frozen contract v1.
