@@ -86,3 +86,18 @@ Acceptance evidence: image build succeeds; Compose starts; `/health` and `/` ret
 - **2026-09-12 — Main developer (Codex):** Added an explicit developer-agent startup protocol. Agents wait for a bounded delegation, then automatically create only the delegated feature branch from the latest `origin/develop` and hand work back for acceptance.
 
 - **2026-09-12 — Main developer (Codex):** Delegated API Settings to Developer 1 on `feature/developer-1-api-settings`. Delegated the independent containerized live-test deployment lane to Developer 2 on `feature/developer-2-container-deploy`; Developer 2 must create that branch from current `origin/develop`, complete only the documented deployment scope, and hand it back for acceptance.
+
+## Superseding priority — do not start the earlier assignments
+
+**2026-09-12 main-developer decision:** The earlier Developer 1 API Settings and Developer 2 container-deployment assignments are **parked**. Do not begin either scope or create Developer 2’s branch until the main developer explicitly reactivates it. The existing Developer 1 branch remains available but must receive no implementation work while parked.
+
+The revised implementation order is:
+
+1. **Shared operational core:** simulation clock and one safe trigger path; issue lifecycle through assignment and resolution; deterministic, persisted events/outcomes. This produces the canonical operational data every later page relies on.
+2. **Live Floor viewport:** replace the thin station grid with the SOW’s usable floor-focused operator experience: floor selection, safe focus, station/issue visibility, Shift Personnel/Stations navigation, and selection preservation. It consumes the operational core but should not invent a second data store.
+3. **Workforce continuity and demand:** 2-2-3 roster, legality, staffing reviews, handover/replan obligations, actionable cap, and deferred demand. This makes live dispatch behavior credible and safe.
+4. **Container deployment:** resume Lane E once the first complete live-test loop is stable, so humans can test the intended behavior rather than a partial prototype.
+5. **Analytics:** build only after resolved/reopened outcomes and staffing events exist. Analytics must derive from the canonical state created above; an earlier dashboard would be mostly empty or misleading.
+6. **Case evidence, providers, and API Settings:** resume only after deterministic case/dispatch behavior is proven. Provider credentials and a settings page are not prerequisites for the provider-free first live test.
+
+Developer agents must wait for a new explicit, bounded delegation aligned to this order. They must not self-select an item from this list.
