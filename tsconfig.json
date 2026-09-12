@@ -4,6 +4,7 @@
     "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowJs": true,
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,
@@ -17,5 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "static/projection.js"]
 }

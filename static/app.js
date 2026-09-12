@@ -1,4 +1,6 @@
-const state = { rooms: [], room: null, selectedStationId: null, selectedResponderId: null, selectedFloorId: null, activePage: 'production-floor', activeTab: 'stations', zoom: 1, lastRecommendation: null, providerSettings: null, settingsBusy: false, busy: false };
+import { coordinateBounds, fanOutResponders, normalizePoint, placeLabels, projectPoint } from './projection.js';
+
+const state = { rooms: [], room: null, selectedStationId: null, selectedResponderId: null, selectedFloorId: null, activePage: 'production-floor', activeTab: 'stations', zoom: 1, panX: 0, panY: 0, lastRecommendation: null, providerSettings: null, settingsBusy: false, busy: false };
 const $ = (id) => document.getElementById(id);
 const status = $('status');
 const ACTIVE_ISSUE_STATUSES = new Set(['PENDING', 'OFFER_PENDING', 'ASSIGNED', 'REOPENED']);
@@ -13,15 +15,130 @@ function compareIssues(a, b) { return a.raisedAt.localeCompare(b.raisedAt) || a.
 function activeIssueForStation(room, stationId) { return room.issues.filter((issue) => issue.stationId === stationId && ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0] || null; }
 function stationStatus(room, station) { return activeIssueForStation(room, station.id) ? 'ISSUE ACTIVE' : 'HEALTHY'; }
 function floors(room) { return [...new Set(room.stations.map((station) => station.floorId))].sort(); }
-function mapPosition(room, point) { const stations = room.stations.filter((station) => station.floorId === state.selectedFloorId); const xs = stations.map((station) => station.x); const ys = stations.map((station) => station.y); const minX = Math.min(...xs); const maxX = Math.max(...xs); const minY = Math.min(...ys); const maxY = Math.max(...ys); const percent = (value, min, max) => max === min ? 50 : 8 + ((value - min) / (max - min)) * 84; return { left: percent(point.x, minX, maxX), top: percent(point.y, minY, maxY) }; }
 async function request(url, options) { const response = await fetch(url, options); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || 'The action could not be completed.'); return body; }
 async function loadRooms() { const body = await request('/api/rooms'); state.rooms = body.rooms.filter((room) => room.health === 'READY'); const picker = $('room-picker'); picker.replaceChildren(); for (const room of state.rooms) { const option = element('option'); option.value = room.roomId; option.textContent = `${room.displayName} (${room.roomId})`; picker.append(option); } const locationState = new URLSearchParams(location.hash.slice(1)); const requested = locationState.get('room'); const requestedPage = locationState.get('view'); if (APP_PAGES.includes(requestedPage)) state.activePage = requestedPage; const remembered = localStorage.getItem('response-compass.room'); const selected = state.rooms.find((room) => room.roomId === requested) || state.rooms.find((room) => room.roomId === remembered) || state.rooms[0]; if (!selected) throw new Error('No ready Control Room is available.'); picker.value = selected.roomId; await loadRoom(selected.roomId, true); }
-async function loadRoom(roomId, roomSwitch = false) { setStatus('Loading room…'); const body = await request(`/api/rooms/${encodeURIComponent(roomId)}`); const previousRoomId = state.room?.roomId; state.room = body.room; if (roomSwitch || previousRoomId !== roomId) { state.selectedStationId = null; state.selectedResponderId = null; state.selectedFloorId = null; state.lastRecommendation = null; state.activeTab = 'stations'; state.zoom = 1; } const roomFloors = floors(state.room); const oldest = [...state.room.issues].filter((issue) => ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0]; const stationExists = state.room.stations.some((station) => station.id === state.selectedStationId); state.selectedStationId = stationExists ? state.selectedStationId : oldest?.stationId || state.room.stations[0]?.id || null; const selectedStation = state.room.stations.find((station) => station.id === state.selectedStationId); state.selectedFloorId = roomFloors.includes(state.selectedFloorId) ? state.selectedFloorId : selectedStation?.floorId || roomFloors[0] || null; localStorage.setItem('response-compass.room', roomId); render(); updateLocation(); setStatus(`${state.room.displayName} · revision ${state.room.revision}`); }
+async function loadRoom(roomId, roomSwitch = false) { setStatus('Loading room…'); const body = await request(`/api/rooms/${encodeURIComponent(roomId)}`); const previousRoomId = state.room?.roomId; state.room = body.room; if (roomSwitch || previousRoomId !== roomId) { state.selectedStationId = null; state.selectedResponderId = null; state.selectedFloorId = null; state.lastRecommendation = null; state.activeTab = 'stations'; state.zoom = 1; state.panX = 0; state.panY = 0; } const roomFloors = floors(state.room); const oldest = [...state.room.issues].filter((issue) => ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0]; const stationExists = state.room.stations.some((station) => station.id === state.selectedStationId); state.selectedStationId = stationExists ? state.selectedStationId : oldest?.stationId || state.room.stations[0]?.id || null; const selectedStation = state.room.stations.find((station) => station.id === state.selectedStationId); state.selectedFloorId = roomFloors.includes(state.selectedFloorId) ? state.selectedFloorId : selectedStation?.floorId || roomFloors[0] || null; localStorage.setItem('response-compass.room', roomId); render(); updateLocation(); setStatus(`${state.room.displayName} · revision ${state.room.revision}`); }
 function render() { const room = state.room; if (!room) return; selectPage(state.activePage); renderSimulation(room); const summary = $('room-summary'); summary.replaceChildren(); for (const [label, value] of [['Room', room.displayName], ['Mode', room.mode], ['Clock', room.clockState], ['Revision', String(room.revision)]]) { const item = element('span'); item.append(text(element('strong'), `${label}: `), document.createTextNode(value)); summary.append(item); } renderFloorControls(room); renderFloor(room); renderTab(room); renderStation(room); renderEvents(room); renderAnalytics(room); $('offer-next').disabled = state.busy || !room.issues.some((issue) => issue.status === 'PENDING' || issue.status === 'REOPENED'); }
 function selectedAssignment(room) { const issue = activeIssueForStation(room, state.selectedStationId); return room.assignments.find((assignment) => assignment.issueId === issue?.id && assignment.status === 'ACTIVE') || null; }
 function renderSimulation(room) { $('simulation-time').textContent = `${new Date(room.simulatedAt).toLocaleString()} · ${room.clockState}`; $('pause-simulation').disabled = state.busy || room.clockState === 'PAUSED'; $('resume-simulation').disabled = state.busy || room.clockState === 'RUNNING'; $('trigger-event').disabled = state.busy; $('force-resolve').disabled = state.busy || selectedAssignment(room) === null; }
 function renderFloorControls(room) { const picker = $('floor-picker'); picker.replaceChildren(); for (const floorId of floors(room)) { const option = element('option'); option.value = floorId; option.textContent = floorId; picker.append(option); } picker.value = state.selectedFloorId || ''; $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`; $('zoom-in').disabled = state.zoom >= 1.5; $('zoom-out').disabled = state.zoom <= .75; }
-function renderFloor(room) { const viewport = $('floor-viewport'); viewport.replaceChildren(); viewport.style.setProperty('--floor-zoom', String(state.zoom)); const map = element('div', 'floor-map'); map.setAttribute('aria-label', `${state.selectedFloorId} floor map`); const floorStations = room.stations.filter((station) => station.floorId === state.selectedFloorId); for (const station of floorStations) { const issue = activeIssueForStation(room, station.id); const position = mapPosition(room, station); const button = element('button', `station-marker${issue ? ' active' : ''}${station.id === state.selectedStationId ? ' selected' : ''}`); button.type = 'button'; button.style.left = `${position.left}%`; button.style.top = `${position.top}%`; button.dataset.stationId = station.id; button.setAttribute('aria-label', `${station.displayName}, ${stationStatus(room, station)}`); button.append(text(element('strong'), station.displayName), text(element('span'), issue ? `${issue.class} · ${issue.status}` : 'Healthy')); button.addEventListener('click', () => selectStation(station)); map.append(button); } for (const responder of room.responders.filter((candidate) => candidate.publicLocation.floorId === state.selectedFloorId && (candidate.dutyStatus !== 'OFF_SHIFT' || candidate.id === state.selectedResponderId))) { const position = mapPosition(room, responder.publicLocation); const marker = element('button', `person-marker${responder.id === state.selectedResponderId ? ' selected' : ''}`); marker.type = 'button'; marker.style.left = `${position.left}%`; marker.style.top = `${position.top}%`; marker.setAttribute('aria-label', `${responder.displayName}, ${responder.dutyStatus}`); marker.textContent = responder.displayName.slice(0, 1); marker.addEventListener('click', () => { state.selectedResponderId = responder.id; state.selectedFloorId = responder.publicLocation.floorId; render(); }); map.append(marker); } if (!floorStations.length) map.append(text(element('p', 'empty'), 'No public stations on this floor.')); viewport.append(map); }
+function ensureFloorLayers(viewport) {
+  let world = viewport.querySelector('.floor-world');
+  if (world) return world;
+  world = element('div', 'floor-world');
+  const scene = element('div', 'floor-scene');
+  scene.setAttribute('aria-hidden', 'true');
+  scene.append(element('div', 'floor-plane'));
+  const overlay = element('div', 'floor-overlay');
+  const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  leaders.setAttribute('class', 'floor-leaders');
+  leaders.setAttribute('viewBox', '0 0 1000 520');
+  leaders.setAttribute('aria-hidden', 'true');
+  overlay.append(leaders);
+  world.append(scene, overlay);
+  viewport.append(world);
+  return world;
+}
+function keyedNodes(parent, selector, key) { return new Map([...parent.querySelectorAll(selector)].map((node) => [node.dataset[key], node])); }
+function removeUnused(nodes, used) { for (const [id, node] of nodes) if (!used.has(id)) node.remove(); }
+function setWorldPosition(node, point) { node.style.left = `${point.sx}px`; node.style.top = `${point.sy}px`; }
+function applyViewportTransform() { const world = $('floor-viewport').querySelector('.floor-world'); if (!world) return; world.style.setProperty('--floor-zoom', String(state.zoom)); world.style.setProperty('--floor-pan-x', `${state.panX}px`); world.style.setProperty('--floor-pan-y', `${state.panY}px`); }
+function renderFloor(room) {
+  const viewport = $('floor-viewport');
+  const focusedKey = document.activeElement?.dataset?.floorKey || null;
+  const world = ensureFloorLayers(viewport);
+  const scene = world.querySelector('.floor-scene');
+  const overlay = world.querySelector('.floor-overlay');
+  const leaders = overlay.querySelector('.floor-leaders');
+  const floorStations = room.stations.filter((station) => station.floorId === state.selectedFloorId);
+  const bounds = coordinateBounds(floorStations);
+  const stationLayout = floorStations.map((station) => {
+    const base = projectPoint(normalizePoint(station, bounds));
+    const top = projectPoint({ ...normalizePoint(station, bounds), z: 26 });
+    return { station, base, top, issue: activeIssueForStation(room, station.id) };
+  }).sort((a, b) => a.base.depth - b.base.depth || a.station.id.localeCompare(b.station.id));
+  const machineNodes = keyedNodes(scene, '.floor-machine', 'stationId');
+  const stationHits = keyedNodes(overlay, '.floor-hit.station-hit', 'stationId');
+  const stationLabels = keyedNodes(overlay, '.floor-label.station-label', 'stationId');
+  const usedStations = new Set();
+  const labelInputs = [];
+  for (const item of stationLayout) {
+    const { station, issue } = item;
+    usedStations.add(station.id);
+    let machine = machineNodes.get(station.id);
+    if (!machine) {
+      machine = element('div', 'floor-machine');
+      machine.dataset.stationId = station.id;
+      for (const face of ['top', 'front', 'side']) machine.append(element('span', `machine-face ${face}`));
+      scene.append(machine);
+    }
+    machine.className = `floor-machine${issue ? ' active' : ''}${station.id === state.selectedStationId ? ' selected' : ''}`;
+    setWorldPosition(machine, item.base);
+    let hit = stationHits.get(station.id);
+    if (!hit) {
+      hit = element('button', 'floor-hit station-hit');
+      hit.type = 'button';
+      hit.dataset.stationId = station.id;
+      hit.dataset.floorKey = `station:${station.id}`;
+      hit.addEventListener('click', () => { const current = state.room?.stations.find((candidate) => candidate.id === station.id); if (current) selectStation(current); });
+      overlay.append(hit);
+    }
+    hit.className = `floor-hit station-hit${station.id === state.selectedStationId ? ' selected' : ''}`;
+    hit.setAttribute('aria-label', `${station.displayName}, ${stationStatus(room, station)}`);
+    setWorldPosition(hit, item.base);
+    let label = stationLabels.get(station.id);
+    if (!label) { label = element('div', 'floor-label station-label'); label.dataset.stationId = station.id; overlay.append(label); }
+    label.replaceChildren(text(element('strong'), station.displayName), text(element('span'), issue ? `${issue.class} · ${issue.status}` : 'Healthy'));
+    label.classList.toggle('active', Boolean(issue));
+    labelInputs.push({ id: `station:${station.id}`, anchor: { x: item.top.sx, y: item.top.sy }, width: 112, height: 38, node: label });
+  }
+  removeUnused(machineNodes, usedStations); removeUnused(stationHits, usedStations); removeUnused(stationLabels, usedStations);
+
+  const visibleResponders = room.responders.filter((person) => person.publicLocation.floorId === state.selectedFloorId && (person.dutyStatus !== 'OFF_SHIFT' || person.id === state.selectedResponderId));
+  const responders = fanOutResponders(visibleResponders.map((person) => ({ ...person, x: person.publicLocation.x, y: person.publicLocation.y })));
+  const personNodes = keyedNodes(scene, '.floor-person', 'responderId');
+  const personHits = keyedNodes(overlay, '.floor-hit.person-hit', 'responderId');
+  const personLabels = keyedNodes(overlay, '.floor-label.person-label', 'responderId');
+  const usedPeople = new Set();
+  for (const person of responders) {
+    usedPeople.add(person.id);
+    const projected = projectPoint(normalizePoint(person, bounds));
+    projected.sx += person.offsetX; projected.sy += person.offsetY;
+    let puck = personNodes.get(person.id);
+    if (!puck) { puck = element('div', 'floor-person'); puck.dataset.responderId = person.id; scene.append(puck); }
+    puck.className = `floor-person${person.id === state.selectedResponderId ? ' selected' : ''}`;
+    setWorldPosition(puck, projected);
+    let hit = personHits.get(person.id);
+    if (!hit) {
+      hit = element('button', 'floor-hit person-hit'); hit.type = 'button'; hit.dataset.responderId = person.id; hit.dataset.floorKey = `person:${person.id}`;
+      hit.addEventListener('click', () => { const current = state.room?.responders.find((candidate) => candidate.id === person.id); if (!current) return; state.selectedResponderId = current.id; state.selectedFloorId = current.publicLocation.floorId; render(); });
+      overlay.append(hit);
+    }
+    hit.className = `floor-hit person-hit${person.id === state.selectedResponderId ? ' selected' : ''}`;
+    hit.setAttribute('aria-label', `${person.displayName}, ${person.role}, ${person.dutyStatus}`);
+    setWorldPosition(hit, projected);
+    let label = personLabels.get(person.id);
+    if (!label) { label = element('div', 'floor-label person-label'); label.dataset.responderId = person.id; overlay.append(label); }
+    label.replaceChildren(text(element('strong'), person.displayName), text(element('span'), `${person.role} · ${person.dutyStatus}`));
+    labelInputs.push({ id: `person:${person.id}`, anchor: { x: projected.sx, y: projected.sy }, width: 118, height: 38, node: label });
+  }
+  removeUnused(personNodes, usedPeople); removeUnused(personHits, usedPeople); removeUnused(personLabels, usedPeople);
+  leaders.replaceChildren();
+  const placements = placeLabels(labelInputs, { width: 1000, height: 520 });
+  for (const placement of placements) {
+    const input = labelInputs.find((candidate) => candidate.id === placement.id);
+    input.node.hidden = placement.hidden;
+    if (placement.hidden) continue;
+    input.node.style.left = `${placement.rect.x}px`; input.node.style.top = `${placement.rect.y}px`;
+    input.node.dataset.labelSide = placement.side;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', placement.leader.x1); line.setAttribute('y1', placement.leader.y1); line.setAttribute('x2', placement.leader.x2); line.setAttribute('y2', placement.leader.y2);
+    leaders.append(line);
+  }
+  viewport.setAttribute('aria-label', `${state.selectedFloorId} interactive manufacturing floor viewport`);
+  applyViewportTransform();
+  if (focusedKey) [...overlay.querySelectorAll('[data-floor-key]')].find((node) => node.dataset.floorKey === focusedKey)?.focus({ preventScroll: true });
+}
 function selectStation(station) { state.selectedStationId = station.id; state.selectedFloorId = station.floorId; state.selectedResponderId = null; state.lastRecommendation = null; render(); }
 function renderTab(room) { for (const tab of ['stations', 'personnel']) { const button = $(`tab-${tab}`); const active = state.activeTab === tab; button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active)); } const panel = $('floor-list'); panel.replaceChildren(); if (state.activeTab === 'stations') renderStationList(panel, room); else renderPersonnelList(panel, room); }
 function renderStationList(panel, room) { const floorStations = room.stations.filter((station) => station.floorId === state.selectedFloorId); const active = floorStations.filter((station) => activeIssueForStation(room, station.id)); const healthy = floorStations.filter((station) => !activeIssueForStation(room, station.id)); panel.append(listHeading('Active stations', active.length), ...active.map((station) => stationListItem(room, station))); const details = element('details', 'collapsed-list'); details.append(text(element('summary'), `Healthy stations (${healthy.length})`), ...healthy.map((station) => stationListItem(room, station))); panel.append(details); }
@@ -256,4 +373,22 @@ for (const tab of document.querySelectorAll('.primary-tab')) {
   });
 }
 selectPage(state.activePage);
-$('room-picker').addEventListener('change', (event) => loadRoom(event.target.value, true).catch((error) => setStatus(error.message, true))); $('floor-picker').addEventListener('change', (event) => { state.selectedFloorId = event.target.value; state.selectedResponderId = null; render(); }); $('offer-next').addEventListener('click', () => mutate('/offers', {})); $('tab-stations').addEventListener('click', () => { state.activeTab = 'stations'; render(); }); $('tab-personnel').addEventListener('click', () => { state.activeTab = 'personnel'; render(); }); $('zoom-in').addEventListener('click', () => { state.zoom = Math.min(1.5, Number((state.zoom + .25).toFixed(2))); render(); }); $('zoom-out').addEventListener('click', () => { state.zoom = Math.max(.75, Number((state.zoom - .25).toFixed(2))); render(); }); $('reset-focus').addEventListener('click', () => { const oldest = [...state.room.issues].filter((issue) => ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0]; state.zoom = 1; state.selectedResponderId = null; if (oldest) { state.selectedStationId = oldest.stationId; state.selectedFloorId = state.room.stations.find((station) => station.id === oldest.stationId)?.floorId || state.selectedFloorId; } render(); }); loadRooms().catch((error) => setStatus(error instanceof Error ? error.message : 'Unable to load application.', true)); setInterval(() => { if (!state.busy && state.room) loadRoom(state.room.roomId).catch(() => undefined); }, 5000);
+function changeZoom(delta) { state.zoom = Math.max(.75, Math.min(1.5, Number((state.zoom + delta).toFixed(2)))); renderFloorControls(state.room); applyViewportTransform(); }
+function changePan(dx, dy) { state.panX = Math.max(-240, Math.min(240, state.panX + dx)); state.panY = Math.max(-150, Math.min(150, state.panY + dy)); applyViewportTransform(); }
+const floorViewport = $('floor-viewport');
+let drag = null;
+floorViewport.addEventListener('pointerdown', (event) => { if (event.button !== 0 || event.target.closest('button')) return; drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY, moved: false }; floorViewport.setPointerCapture(event.pointerId); });
+floorViewport.addEventListener('pointermove', (event) => { if (!drag || event.pointerId !== drag.pointerId) return; const dx = event.clientX - drag.x; const dy = event.clientY - drag.y; if (!drag.moved && Math.hypot(dx, dy) < 4) return; drag.moved = true; state.panX = Math.max(-240, Math.min(240, drag.panX + dx)); state.panY = Math.max(-150, Math.min(150, drag.panY + dy)); floorViewport.classList.add('dragging'); applyViewportTransform(); });
+function endFloorDrag(event) { if (!drag || event.pointerId !== drag.pointerId) return; drag = null; floorViewport.classList.remove('dragging'); }
+floorViewport.addEventListener('pointerup', endFloorDrag); floorViewport.addEventListener('pointercancel', endFloorDrag);
+floorViewport.addEventListener('keydown', (event) => { const panKeys = { ArrowLeft: [24, 0], ArrowRight: [-24, 0], ArrowUp: [0, 24], ArrowDown: [0, -24] }; if (panKeys[event.key]) { event.preventDefault(); changePan(...panKeys[event.key]); } else if (event.key === '+' || event.key === '=') { event.preventDefault(); changeZoom(.25); } else if (event.key === '-' || event.key === '_') { event.preventDefault(); changeZoom(-.25); } });
+$('room-picker').addEventListener('change', (event) => loadRoom(event.target.value, true).catch((error) => setStatus(error.message, true)));
+$('floor-picker').addEventListener('change', (event) => { state.selectedFloorId = event.target.value; state.selectedResponderId = null; state.panX = 0; state.panY = 0; render(); });
+$('offer-next').addEventListener('click', () => mutate('/offers', {}));
+$('tab-stations').addEventListener('click', () => { state.activeTab = 'stations'; render(); });
+$('tab-personnel').addEventListener('click', () => { state.activeTab = 'personnel'; render(); });
+$('zoom-in').addEventListener('click', () => changeZoom(.25));
+$('zoom-out').addEventListener('click', () => changeZoom(-.25));
+$('reset-focus').addEventListener('click', () => { const oldest = [...state.room.issues].filter((issue) => ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0]; state.zoom = 1; state.panX = 0; state.panY = 0; state.selectedResponderId = null; if (oldest) { state.selectedStationId = oldest.stationId; state.selectedFloorId = state.room.stations.find((station) => station.id === oldest.stationId)?.floorId || state.selectedFloorId; } render(); });
+loadRooms().catch((error) => setStatus(error instanceof Error ? error.message : 'Unable to load application.', true));
+setInterval(() => { if (!state.busy && state.room) loadRoom(state.room.roomId).catch(() => undefined); }, 5000);
