@@ -116,6 +116,7 @@ async function providerAction(providerId, action) {
     state.settingsBusy = false;
     renderProviderSettings();
   }
+}
 function statCard(title, primary, details) {
   const card = element('div', 'stat-card');
   card.append(text(element('p', 'eyebrow'), title), text(element('p', 'stat-primary'), primary));
