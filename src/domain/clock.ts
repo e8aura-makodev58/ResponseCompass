@@ -53,8 +53,8 @@ export interface EventProposal {
   fallbackReason?: string;
 }
 
-export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth, proposal?: EventProposal): EventProposal {
-  const nextAt = new Date(Date.parse(state.simulatedAt) + TICK_MS).toISOString();
+export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth, proposal?: EventProposal, advance = true): EventProposal {
+  const nextAt = new Date(Date.parse(state.simulatedAt) + (advance ? TICK_MS : 0)).toISOString();
   state.simulatedAt = nextAt;
 
   for (const issue of state.issues) {

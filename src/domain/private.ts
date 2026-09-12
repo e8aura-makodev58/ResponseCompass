@@ -23,4 +23,5 @@ export interface HiddenRoomTruth {
   skills: Record<string, Partial<Record<IssueClass, ResponderSkill>>>;
   /** Persisted deterministic random-stream cursor (SOW s3.2). */
   randomStream: { seed: string; cursor: number };
+  automation?: { nextEventAt: number; offers: Record<string, number>; assignments: Record<string, number> };
 }

@@ -81,6 +81,8 @@ Acceptance evidence: image build succeeds; Compose starts; `/health` and `/` ret
 
 ## Append-only collaboration entries
 
+- **2026-09-12 — Codex — Automatic simulation task and handoff:** User delegated automatic simulation after Sol completed the viewport. Branch `feature/automatic-simulation`; scope: server scheduler, persisted simulator timing, automatic Compass offers and simulator acceptance/resolution, pause and 1x/60x controls. Changes span domain automation/clock/lifecycle/types/projection/private state, server startup/API, minimal simulation controls, and tests. Build and 78 hermetic tests pass. No live settings or state changed; no restart, push, or merge performed. Additive state fields default safely for existing rooms. Main-developer integration review requested.
+
 - **2026-09-12 — Main developer (Codex):** Created this protocol. `develop` is being established as the live integration branch from the verified current application baseline. No human feature branch is active yet.
 
 - **2026-09-12 — Main developer (Codex):** Added an explicit developer-agent startup protocol. Agents wait for a bounded delegation, then automatically create only the delegated feature branch from the latest `origin/develop` and hand work back for acceptance.

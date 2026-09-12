@@ -17,6 +17,7 @@ import {
 import { pauseClock, resumeClock, triggerNextEvent, type EventProposal } from '../domain/clock.js';
 import { ISSUE_CLASSES, type IssueClass, type RoomState } from '../domain/types.js';
 import { resolveAssignment } from '../domain/lifecycle.js';
+import { advanceAutomation } from '../domain/automation.js';
 import type { AppConfig } from '../config.js';
 import { isProviderId } from '../providers/catalog.js';
 import { ProviderSettingsStore } from '../providers/settingsStore.js';
@@ -34,6 +35,7 @@ export interface ServerDeps {
   log?: (line: Record<string, string | number>) => void;
   providerSettings?: ProviderSettingsStore;
   inferenceClient?: InferenceClient;
+  automaticSimulation?: boolean;
 }
 
 export function createApp({
@@ -48,8 +50,9 @@ export function createApp({
     },
   ),
   inferenceClient = new ProviderInferenceClient(),
+  automaticSimulation = false,
 }: ServerDeps): Server {
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     const startedAt = Date.now();
     handle(req, res, config, registry, providerSettings, inferenceClient)
       .catch((error: unknown) => {
@@ -70,6 +73,46 @@ export function createApp({
         });
       });
   });
+  if (automaticSimulation) {
+    const busy = new Set<string>();
+    const matching = new Set<string>();
+    const lastTick = new Map<string, number>();
+    const timer = setInterval(() => {
+      void registry.summaries().then(rooms => {
+        for (const room of rooms) {
+          if (room.health !== 'READY' || busy.has(room.roomId)) continue;
+          const entry = registry.get(room.roomId)!;
+          const now = Date.now();
+          const elapsed = now - (lastTick.get(room.roomId) ?? now);
+          lastTick.set(room.roomId, now);
+          if (room.clockState !== 'RUNNING' || room.mode !== 'LIVE') continue;
+          busy.add(room.roomId);
+          void entry.store.mutateWithHidden(undefined, (draft, hidden) => advanceAutomation(draft, hidden, elapsed))
+            .then(async snapshot => {
+              if (snapshot.clockState !== 'RUNNING' || matching.has(room.roomId)) return;
+              const issue = selectNextIssue(snapshot);
+              if (!issue || !snapshot.responders.some(row => row.dutyStatus === 'AVAILABLE')) return;
+              const baseline = buildRecommendation(snapshot, issue);
+              matching.add(room.roomId);
+              void compassAttempt(config, providerSettings, inferenceClient, snapshot, baseline).then(async attempt => {
+                await entry.store.mutate(undefined, draft => {
+                  if (draft.clockState !== 'RUNNING' || draft.mode !== 'LIVE') return;
+                  const current = selectNextIssue(draft);
+                  if (current?.id !== issue.id) return;
+                  if (JSON.stringify(buildRecommendation(draft, current).candidates) !== JSON.stringify(baseline.candidates)) return;
+                  createNextOffer(draft, attempt.ok ? { ...attempt.value, provider: attempt.provider, model: attempt.model } : undefined, attempt.ok ? undefined : attempt.reason);
+                });
+              }).catch(() => log({ level: 'error', message: 'Automatic matching failed', roomId: room.roomId }))
+                .finally(() => matching.delete(room.roomId));
+            }).catch(() => log({ level: 'error', message: 'Simulation tick failed', roomId: room.roomId }))
+            .finally(() => busy.delete(room.roomId));
+        }
+      }).catch(() => log({ level: 'error', message: 'Simulation registry unavailable' }));
+    }, 1000);
+    timer.unref();
+    server.on('close', () => clearInterval(timer));
+  }
+  return server;
 }
 
 async function handle(
@@ -208,6 +251,17 @@ async function handle(
       });
     }
     throw new ApiError('NOT_FOUND', 'Unknown offer action.');
+  }
+
+  if (segments.length === 4 && segments[3] === 'speed') {
+    requireMethod(method, ['POST']);
+    const entry = requireReadyRoom(registry, roomId);
+    const body = await readJsonBody(req);
+    const expectedRevision = readExpectedRevision(body);
+    if (body['speedMultiplier'] !== 1 && body['speedMultiplier'] !== 60) throw new DispatchValidationError('Speed must be 1 or 60.');
+    const speed = body['speedMultiplier'];
+    const updated = await entry.store.mutate(expectedRevision, draft => { draft.speedMultiplier = speed; });
+    return sendJson(res, 200, { room: projectRoomState(updated) });
   }
 
   // POST /api/rooms/:roomId/pause
