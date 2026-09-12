@@ -43,7 +43,17 @@ export function resumeClock(state: RoomState): void {
  * CALLER MUST PERSIST the mutated `hidden` argument after this function returns
  * (e.g. via RoomStore.mutateWithHidden) so the RNG cursor survives restart.
  */
-export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth): void {
+export interface EventProposal {
+  source: 'DETERMINISTIC_FALLBACK' | 'PROVIDER';
+  stationId?: string;
+  issueClass?: IssueClass;
+  provider?: string;
+  model?: string;
+  rationale?: string;
+  fallbackReason?: string;
+}
+
+export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth, proposal?: EventProposal): EventProposal {
   const nextAt = new Date(Date.parse(state.simulatedAt) + TICK_MS).toISOString();
   state.simulatedAt = nextAt;
 
@@ -57,15 +67,31 @@ export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth): voi
   if (freeStations.length === 0) {
     appendEvent(state, 'TICK_ADVANCED', { simulatedAt: nextAt });
     state.audits.push(makeAudit(state, 'SCHEDULER', 'TICK_ADVANCED', `Simulated time advanced to ${nextAt}; no free station for a new issue.`));
-    return;
+    return { source: 'DETERMINISTIC_FALLBACK', fallbackReason: proposal?.fallbackReason ?? 'NO_FREE_STATION' };
   }
 
   const rng = new RandomStream(hidden.randomStream.seed, hidden.randomStream.cursor);
-  const station = freeStations[rng.int(0, freeStations.length - 1)]!;
-  const issueClass = rng.pick(ISSUE_CLASSES) as IssueClass;
+  const fallbackStation = freeStations[rng.int(0, freeStations.length - 1)]!;
+  const fallbackClass = rng.pick(ISSUE_CLASSES) as IssueClass;
   const riskImpact = rng.int(2, 9);
   const complexity = rng.int(1, 5);
   hidden.randomStream.cursor = rng.position;
+
+  const proposedStation = proposal?.stationId === undefined ? undefined : freeStations.find((item) => item.id === proposal.stationId);
+  const proposedClass = proposal?.issueClass;
+  const providerValid = proposal?.source === 'PROVIDER' && proposedStation !== undefined && proposedClass !== undefined && ISSUE_CLASSES.includes(proposedClass);
+  const station = providerValid ? proposedStation : fallbackStation;
+  const issueClass = providerValid ? proposedClass : fallbackClass;
+  const applied: EventProposal = providerValid
+    ? { ...proposal, stationId: station.id, issueClass }
+    : {
+        source: 'DETERMINISTIC_FALLBACK',
+        stationId: station.id,
+        issueClass,
+        ...((proposal?.source === 'PROVIDER' || proposal?.fallbackReason !== undefined)
+          ? { fallbackReason: proposal?.source === 'PROVIDER' ? 'INVALID_SCHEMA' : proposal.fallbackReason }
+          : {}),
+      };
 
   const issue: Issue = {
     id: `${state.roomId}-iss-${String(state.issues.length + 1).padStart(3, '0')}`,
@@ -89,6 +115,8 @@ export function triggerNextEvent(state: RoomState, hidden: HiddenRoomTruth): voi
   });
   appendEvent(state, 'TICK_ADVANCED', { simulatedAt: nextAt, issueId: issue.id });
   state.audits.push(makeAudit(state, 'SCHEDULER', 'ISSUE_TRIGGERED', `New ${issueClass} issue ${issue.id} triggered at station ${station.id}.`));
+  appendEvent(state, 'MES_PROPOSAL_APPLIED', { source: applied.source, stationId: station.id, issueClass });
+  return applied;
 }
 
 function appendEvent(state: RoomState, type: string, payload: Record<string, string | number | boolean>): void {

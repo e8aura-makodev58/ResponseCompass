@@ -45,13 +45,28 @@ export interface CandidatePacket {
 }
 
 export interface Recommendation {
-  source: 'DETERMINISTIC_FALLBACK';
+  source: 'DETERMINISTIC_FALLBACK' | 'PROVIDER';
   issueId: string;
   candidates: CandidatePacket[];
   winnerId: string;
   meaningfulAlternativeId: string | null;
   nearestAvailableWinnerId: string;
   naiveWeightedWinnerId: string;
+  fallbackReason?: string;
+  provider?: string;
+  model?: string;
+  explanation?: string;
+  uncertainty?: string;
+}
+
+export interface ProviderRanking {
+  rankedCandidateIds: string[];
+  winnerId: string;
+  meaningfulAlternativeId: string | null;
+  explanation: string;
+  uncertainty: string;
+  provider: string;
+  model: string;
 }
 
 const BAND_RANK = { CRITICAL: 0, HIGH: 1, STANDARD: 2 } as const;
@@ -103,19 +118,60 @@ export function buildRecommendation(state: RoomState, issue: Issue): Recommendat
   };
 }
 
-export function createNextOffer(state: RoomState): { offer: Offer; recommendation: Recommendation } {
+export function createNextOffer(
+  state: RoomState,
+  providerRanking?: ProviderRanking,
+  fallbackReason?: string,
+): { offer: Offer; recommendation: Recommendation } {
   const issue = selectNextIssue(state);
   if (issue === undefined) {
     throw new DispatchConflictError('No pending actionable issue is available for dispatch.');
   }
-  const recommendation = buildRecommendation(state, issue);
-  const offer = createOffer(state, issue, recommendation.winnerId, recommendation.candidates.map((candidate) => candidate.responderId));
+  const baseline = buildRecommendation(state, issue);
+  const recommendation = providerRanking === undefined
+    ? { ...baseline, ...(fallbackReason === undefined ? {} : { fallbackReason }) }
+    : applyProviderRanking(baseline, providerRanking);
+  const offer = createOffer(
+    state,
+    issue,
+    recommendation.winnerId,
+    recommendation.source === 'PROVIDER'
+      ? providerRanking!.rankedCandidateIds
+      : recommendation.candidates.map((candidate) => candidate.responderId),
+  );
   appendDispatchRecord(state, 'OFFER_CREATED', issue, offer, {
     decisionSource: recommendation.source,
     baselineWinnerId: recommendation.naiveWeightedWinnerId,
     alternativeResponderId: recommendation.meaningfulAlternativeId ?? 'NONE',
   });
   return { offer, recommendation };
+}
+
+function applyProviderRanking(baseline: Recommendation, ranking: ProviderRanking): Recommendation {
+  const supplied = baseline.candidates.map((candidate) => candidate.responderId);
+  const ranked = ranking.rankedCandidateIds;
+  const exactPermutation = ranked.length === supplied.length
+    && new Set(ranked).size === supplied.length
+    && ranked.every((id) => supplied.includes(id));
+  const alternativeValid = supplied.length === 1
+    ? ranking.meaningfulAlternativeId === null
+    : ranking.meaningfulAlternativeId !== null
+      && ranking.meaningfulAlternativeId !== ranking.winnerId
+      && supplied.includes(ranking.meaningfulAlternativeId);
+  if (!exactPermutation || ranked[0] !== ranking.winnerId || !alternativeValid) {
+    return { ...baseline, fallbackReason: 'INVALID_SCHEMA' };
+  }
+  return {
+    ...baseline,
+    source: 'PROVIDER',
+    candidates: ranked.map((id) => baseline.candidates.find((candidate) => candidate.responderId === id)!),
+    winnerId: ranking.winnerId,
+    meaningfulAlternativeId: ranking.meaningfulAlternativeId,
+    provider: ranking.provider,
+    model: ranking.model,
+    explanation: ranking.explanation,
+    uncertainty: ranking.uncertainty,
+  };
 }
 
 export function acceptOffer(state: RoomState, offerId: string): Offer {
