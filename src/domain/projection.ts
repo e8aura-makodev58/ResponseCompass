@@ -28,6 +28,7 @@ export interface PublicRoomState {
   simulatedAt: string;
   mode: string;
   clockState: string;
+  speedMultiplier: number;
   stations: PublicStation[];
   responders: PublicResponder[];
   issues: PublicIssue[];
@@ -218,6 +219,7 @@ export function projectRoomState(state: RoomState): PublicRoomState {
     simulatedAt: state.simulatedAt,
     mode: state.mode,
     clockState: state.clockState,
+    speedMultiplier: state.speedMultiplier ?? 60,
     stations: state.stations.map(projectStation),
     responders: state.responders.map(projectResponder),
     issues: state.issues.map(projectIssue),

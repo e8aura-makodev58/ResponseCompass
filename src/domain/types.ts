@@ -146,6 +146,7 @@ export interface RoomState {
   simulatedAt: string;
   mode: RoomMode;
   clockState: ClockState;
+  speedMultiplier?: 1 | 60;
   stations: Station[];
   responders: Responder[];
   issues: Issue[];

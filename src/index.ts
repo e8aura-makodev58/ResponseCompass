@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const seeded = await RoomRegistry.seedIfEmpty(paths, DEFAULT_ROOM_SPECS, config.plant1SimulationSeedPath);
   const registry = await RoomRegistry.open(paths);
 
-  const server = createApp({ config, registry });
+  const server = createApp({ config, registry, automaticSimulation: true });
   // Bind failures are operational configuration errors, not uncaught process
   // crashes. The default port may already host another local application.
   server.once('error', (error: NodeJS.ErrnoException) => {

@@ -31,7 +31,7 @@ export async function startApp(
   dataRoot: string,
   providerSettings?: ProviderSettingsStore,
   log: (line: Record<string, string | number>) => void = () => undefined,
-  options: { providersEnabled?: boolean; inferenceClient?: InferenceClient } = {},
+  options: { providersEnabled?: boolean; inferenceClient?: InferenceClient; automaticSimulation?: boolean } = {},
 ): Promise<TestApp> {
   const config = { ...loadConfig({}), dataRoot, port: 0, providersEnabled: options.providersEnabled ?? false };
   const paths = new DataPaths(dataRoot);
@@ -42,6 +42,7 @@ export async function startApp(
     config,
     registry,
     log,
+    automaticSimulation: options.automaticSimulation ?? false,
     ...(providerSettings === undefined ? {} : { providerSettings }),
     ...(options.inferenceClient === undefined ? {} : { inferenceClient: options.inferenceClient }),
   });

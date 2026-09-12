@@ -27,6 +27,7 @@ export function resolveAssignment(
   state: RoomState,
   hidden: HiddenRoomTruth,
   assignmentId: string,
+  observedDurationMinutes?: number,
 ): { assignment: Assignment; outcome: ResolutionOutcome } {
   const assignment = state.assignments.find((candidate) => candidate.id === assignmentId);
   if (assignment === undefined) throw new DispatchValidationError('Unknown assignment.');
@@ -46,7 +47,7 @@ export function resolveAssignment(
 
   const rng = new RandomStream(hidden.randomStream.seed, hidden.randomStream.cursor);
   const durationFactor = rng.float(MIN_DURATION_FACTOR, MAX_DURATION_FACTOR);
-  const durationMinutes = Math.max(1, Math.round(skill.trueMedianMinutes * durationFactor));
+  const durationMinutes = observedDurationMinutes ?? Math.max(1, Math.round(skill.trueMedianMinutes * durationFactor));
   const success = rng.next() < skill.trueSuccessProbability;
   hidden.randomStream.cursor = rng.position;
 
