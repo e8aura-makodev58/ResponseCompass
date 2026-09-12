@@ -6,16 +6,21 @@ import { projectOffer, projectRoomState } from '../domain/projection.js';
 import {
   acceptOffer,
   createNextOffer,
+  buildRecommendation,
+  selectNextIssue,
+  type ProviderRanking,
   DispatchConflictError,
   DispatchValidationError,
   overrideOffer,
   rejectOffer,
 } from '../domain/dispatch.js';
-import { pauseClock, resumeClock, triggerNextEvent } from '../domain/clock.js';
+import { pauseClock, resumeClock, triggerNextEvent, type EventProposal } from '../domain/clock.js';
+import { ISSUE_CLASSES, type IssueClass, type RoomState } from '../domain/types.js';
 import { resolveAssignment } from '../domain/lifecycle.js';
 import type { AppConfig } from '../config.js';
 import { isProviderId } from '../providers/catalog.js';
 import { ProviderSettingsStore } from '../providers/settingsStore.js';
+import { ProviderInferenceClient, type InferenceClient } from '../providers/inference.js';
 import { DataPaths } from '../store/paths.js';
 import type { RoomEntry, RoomRegistry } from '../store/registry.js';
 import { StaleRevisionError } from '../store/roomStore.js';
@@ -28,6 +33,7 @@ export interface ServerDeps {
   /** Structured request logging; never receives a body or a credential. */
   log?: (line: Record<string, string | number>) => void;
   providerSettings?: ProviderSettingsStore;
+  inferenceClient?: InferenceClient;
 }
 
 export function createApp({
@@ -41,10 +47,11 @@ export function createApp({
       ...(process.env['OPENROUTER_API_KEY'] ? { openrouter: process.env['OPENROUTER_API_KEY'] } : {}),
     },
   ),
+  inferenceClient = new ProviderInferenceClient(),
 }: ServerDeps): Server {
   return createServer((req, res) => {
     const startedAt = Date.now();
-    handle(req, res, config, registry, providerSettings)
+    handle(req, res, config, registry, providerSettings, inferenceClient)
       .catch((error: unknown) => {
         const apiError = toApiError(error);
         if (apiError.status >= 500) {
@@ -71,6 +78,7 @@ async function handle(
   config: AppConfig,
   registry: RoomRegistry,
   providerSettings: ProviderSettingsStore,
+  inferenceClient: InferenceClient,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const segments = url.pathname.split('/').filter((segment) => segment !== '');
@@ -138,9 +146,20 @@ async function handle(
     const entry = requireReadyRoom(registry, roomId);
     const body = await readJsonBody(req);
     const expectedRevision = readExpectedRevision(body);
+    const snapshot = await entry.store.read();
+    assertOriginalRevision(expectedRevision, snapshot);
+    const issue = selectNextIssue(snapshot);
+    let providerRanking: ProviderRanking | undefined;
+    let fallbackReason: string | undefined;
+    if (issue !== undefined) {
+      const baseline = buildRecommendation(snapshot, issue);
+      const attempt = await compassAttempt(config, providerSettings, inferenceClient, snapshot, baseline);
+      if (attempt.ok) providerRanking = { ...attempt.value, provider: attempt.provider, model: attempt.model };
+      else fallbackReason = attempt.reason;
+    }
     let result: ReturnType<typeof createNextOffer> | undefined;
     const updated = await entry.store.mutate(expectedRevision, (draft) => {
-      result = createNextOffer(draft);
+      result = createNextOffer(draft, providerRanking, fallbackReason);
     });
     return sendJson(res, 201, {
       room: projectRoomState(updated),
@@ -217,10 +236,23 @@ async function handle(
     const entry = requireReadyRoom(registry, roomId);
     const body = await readJsonBody(req);
     const expectedRevision = readExpectedRevision(body);
+    const snapshot = await entry.store.read();
+    assertOriginalRevision(expectedRevision, snapshot);
+    const attempt = await mesAttempt(config, providerSettings, inferenceClient, snapshot);
+    const proposal: EventProposal = attempt.ok
+      ? {
+          source: 'PROVIDER',
+          ...attempt.value,
+          issueClass: attempt.value.issueClass as IssueClass,
+          provider: attempt.provider,
+          model: attempt.model,
+        }
+      : { source: 'DETERMINISTIC_FALLBACK', fallbackReason: attempt.reason };
+    let applied: EventProposal | undefined;
     const updated = await entry.store.mutateWithHidden(expectedRevision, (draft, hiddenDraft) => {
-      triggerNextEvent(draft, hiddenDraft);
+      applied = triggerNextEvent(draft, hiddenDraft, proposal);
     });
-    return sendJson(res, 200, { room: projectRoomState(updated) });
+    return sendJson(res, 200, { room: projectRoomState(updated), eventProposal: applied });
   }
 
   // POST /api/rooms/:roomId/assignments/:assignmentId/resolve
@@ -242,6 +274,59 @@ async function handle(
   }
 
   throw new ApiError('NOT_FOUND', 'Unknown endpoint.');
+}
+
+function assertOriginalRevision(expectedRevision: number, snapshot: RoomState): void {
+  if (snapshot.revision !== expectedRevision) throw new StaleRevisionError(expectedRevision, snapshot.revision);
+}
+
+async function runtimeAttempt(
+  config: AppConfig,
+  settings: ProviderSettingsStore,
+  room: RoomState,
+) {
+  if (!config.providersEnabled) return { ok: false as const, reason: 'PROVIDERS_DISABLED' as const };
+  if (room.mode !== 'LIVE') return { ok: false as const, reason: 'ROOM_OFFLINE' as const };
+  const selection = await settings.runtimeSelection();
+  return selection === null
+    ? { ok: false as const, reason: 'NO_RUNTIME_SELECTION' as const }
+    : { ok: true as const, selection };
+}
+
+async function mesAttempt(
+  config: AppConfig,
+  settings: ProviderSettingsStore,
+  client: InferenceClient,
+  room: RoomState,
+) {
+  const freeStationIds = room.stations.filter((station) => station.status === 'NORMAL').map((station) => station.id);
+  if (freeStationIds.length === 0) return { ok: false as const, reason: 'NO_FREE_STATION' as const };
+  const runtime = await runtimeAttempt(config, settings, room);
+  if (!runtime.ok) return runtime;
+  return client.proposeMes(runtime.selection, {
+    roomId: room.roomId,
+    revision: room.revision,
+    simulatedAt: room.simulatedAt,
+    freeStationIds,
+    issueClasses: [...ISSUE_CLASSES],
+  });
+}
+
+async function compassAttempt(
+  config: AppConfig,
+  settings: ProviderSettingsStore,
+  client: InferenceClient,
+  room: RoomState,
+  recommendation: ReturnType<typeof buildRecommendation>,
+) {
+  const runtime = await runtimeAttempt(config, settings, room);
+  if (!runtime.ok) return runtime;
+  return client.rankCompass(runtime.selection, {
+    roomId: room.roomId,
+    revision: room.revision,
+    issueId: recommendation.issueId,
+    candidates: recommendation.candidates.map((candidate) => ({ ...candidate })),
+  });
 }
 
 async function handleProviderSettings(

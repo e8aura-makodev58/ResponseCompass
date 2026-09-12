@@ -52,6 +52,13 @@ export interface PublicSettings {
   compass: { provider: ProviderId; model: string } | null;
 }
 
+/** Server-only runtime material. Never return or log this object. */
+export interface RuntimeSelection {
+  provider: ProviderId;
+  model: string;
+  apiKey: string;
+}
+
 const EMPTY_SETTINGS: ProviderSettingsFile = {
   schemaVersion: 1,
   selected: null,
@@ -75,6 +82,16 @@ export class ProviderSettingsStore {
     return this.enqueue(async () => {
       const snapshot = await this.readSnapshot();
       return this.project(snapshot.settings, snapshot.credentials);
+    });
+  }
+
+  async runtimeSelection(): Promise<RuntimeSelection | null> {
+    return this.enqueue(async () => {
+      const snapshot = await this.readSnapshot();
+      const selected = snapshot.settings.selected;
+      if (selected === null) return null;
+      const credential = this.effectiveCredential(selected.provider, snapshot.credentials);
+      return credential === null ? null : { ...selected, apiKey: credential.key };
     });
   }
 

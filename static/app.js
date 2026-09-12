@@ -17,7 +17,7 @@ function mapPosition(room, point) { const stations = room.stations.filter((stati
 async function request(url, options) { const response = await fetch(url, options); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || 'The action could not be completed.'); return body; }
 async function loadRooms() { const body = await request('/api/rooms'); state.rooms = body.rooms.filter((room) => room.health === 'READY'); const picker = $('room-picker'); picker.replaceChildren(); for (const room of state.rooms) { const option = element('option'); option.value = room.roomId; option.textContent = `${room.displayName} (${room.roomId})`; picker.append(option); } const locationState = new URLSearchParams(location.hash.slice(1)); const requested = locationState.get('room'); const requestedPage = locationState.get('view'); if (APP_PAGES.includes(requestedPage)) state.activePage = requestedPage; const remembered = localStorage.getItem('response-compass.room'); const selected = state.rooms.find((room) => room.roomId === requested) || state.rooms.find((room) => room.roomId === remembered) || state.rooms[0]; if (!selected) throw new Error('No ready Control Room is available.'); picker.value = selected.roomId; await loadRoom(selected.roomId, true); }
 async function loadRoom(roomId, roomSwitch = false) { setStatus('Loading room…'); const body = await request(`/api/rooms/${encodeURIComponent(roomId)}`); const previousRoomId = state.room?.roomId; state.room = body.room; if (roomSwitch || previousRoomId !== roomId) { state.selectedStationId = null; state.selectedResponderId = null; state.selectedFloorId = null; state.lastRecommendation = null; state.activeTab = 'stations'; state.zoom = 1; } const roomFloors = floors(state.room); const oldest = [...state.room.issues].filter((issue) => ACTIVE_ISSUE_STATUSES.has(issue.status)).sort(compareIssues)[0]; const stationExists = state.room.stations.some((station) => station.id === state.selectedStationId); state.selectedStationId = stationExists ? state.selectedStationId : oldest?.stationId || state.room.stations[0]?.id || null; const selectedStation = state.room.stations.find((station) => station.id === state.selectedStationId); state.selectedFloorId = roomFloors.includes(state.selectedFloorId) ? state.selectedFloorId : selectedStation?.floorId || roomFloors[0] || null; localStorage.setItem('response-compass.room', roomId); render(); updateLocation(); setStatus(`${state.room.displayName} · revision ${state.room.revision}`); }
-function render() { const room = state.room; if (!room) return; selectPage(state.activePage); renderSimulation(room); const summary = $('room-summary'); summary.replaceChildren(); for (const [label, value] of [['Room', room.displayName], ['Mode', room.mode], ['Clock', room.clockState], ['Revision', String(room.revision)]]) { const item = element('span'); item.append(text(element('strong'), `${label}: `), document.createTextNode(value)); summary.append(item); } renderFloorControls(room); renderFloor(room); renderTab(room); renderStation(room); renderEvents(room); $('offer-next').disabled = state.busy || !room.issues.some((issue) => issue.status === 'PENDING' || issue.status === 'REOPENED'); }
+function render() { const room = state.room; if (!room) return; selectPage(state.activePage); renderSimulation(room); const summary = $('room-summary'); summary.replaceChildren(); for (const [label, value] of [['Room', room.displayName], ['Mode', room.mode], ['Clock', room.clockState], ['Revision', String(room.revision)]]) { const item = element('span'); item.append(text(element('strong'), `${label}: `), document.createTextNode(value)); summary.append(item); } renderFloorControls(room); renderFloor(room); renderTab(room); renderStation(room); renderEvents(room); renderAnalytics(room); $('offer-next').disabled = state.busy || !room.issues.some((issue) => issue.status === 'PENDING' || issue.status === 'REOPENED'); }
 function selectedAssignment(room) { const issue = activeIssueForStation(room, state.selectedStationId); return room.assignments.find((assignment) => assignment.issueId === issue?.id && assignment.status === 'ACTIVE') || null; }
 function renderSimulation(room) { $('simulation-time').textContent = `${new Date(room.simulatedAt).toLocaleString()} · ${room.clockState}`; $('pause-simulation').disabled = state.busy || room.clockState === 'PAUSED'; $('resume-simulation').disabled = state.busy || room.clockState === 'RUNNING'; $('trigger-event').disabled = state.busy; $('force-resolve').disabled = state.busy || selectedAssignment(room) === null; }
 function renderFloorControls(room) { const picker = $('floor-picker'); picker.replaceChildren(); for (const floorId of floors(room)) { const option = element('option'); option.value = floorId; option.textContent = floorId; picker.append(option); } picker.value = state.selectedFloorId || ''; $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`; $('zoom-in').disabled = state.zoom >= 1.5; $('zoom-out').disabled = state.zoom <= .75; }
@@ -29,8 +29,8 @@ function stationListItem(room, station) { const issue = activeIssueForStation(ro
 function renderPersonnelList(panel, room) { const onDuty = room.responders.filter((person) => person.dutyStatus !== 'OFF_SHIFT'); const offShift = room.responders.filter((person) => person.dutyStatus === 'OFF_SHIFT'); panel.append(listHeading('On-duty personnel', onDuty.length), ...onDuty.map(personListItem)); const details = element('details', 'collapsed-list'); details.append(text(element('summary'), `Off-shift personnel (${offShift.length})`), ...offShift.map(personListItem)); panel.append(details); }
 function personListItem(person) { const button = element('button', `list-item person${person.id === state.selectedResponderId ? ' selected' : ''}`); button.type = 'button'; button.append(text(element('strong'), person.displayName), text(element('span'), `${person.role} · ${person.dutyStatus}`)); button.addEventListener('click', () => { state.selectedResponderId = person.id; state.selectedFloorId = person.publicLocation.floorId; render(); }); return button; }
 function listHeading(label, count) { return text(element('p', 'list-heading'), `${label} (${count})`); }
-function renderStation(room) { const box = $('station-status'); box.replaceChildren(); const station = room.stations.find((candidate) => candidate.id === state.selectedStationId); if (!station) return box.append(text(element('p', 'empty'), 'Select a station.')); box.append(text(element('p', 'meta'), `${station.displayName} · ${station.floorId} · ${stationStatus(room, station)}`)); const issue = activeIssueForStation(room, station.id); if (!issue) return box.append(text(element('p', 'empty'), 'No active work at this station.')); box.append(text(element('p', 'issue-title'), `${issue.id} · ${issue.class}`), text(element('span', `priority ${issue.priority.band}`), `${issue.priority.band} · ${issue.priority.score}`), text(element('p', 'meta'), `Raised ${new Date(issue.raisedAt).toLocaleString()} · ${issue.status}`)); const pending = room.offers.find((offer) => offer.issueId === issue.id && offer.status === 'PENDING'); if (pending) renderOffer(box, room, pending); else if (issue.status === 'PENDING') box.append(text(element('p', 'meta'), 'Pending deterministic dispatch. Use “Offer next issue” to create an offer.')); else if (issue.status === 'ASSIGNED') { const assignment = room.assignments.find((candidate) => candidate.issueId === issue.id && candidate.status === 'ACTIVE'); const responder = room.responders.find((candidate) => candidate.id === assignment?.responderId); box.append(text(element('p', 'recommendation'), `Assigned to ${responder?.displayName || assignment?.responderId || 'unknown responder'}.`)); } if (state.lastRecommendation?.issueId === issue.id) renderRecommendation(box, state.lastRecommendation); }
-function renderRecommendation(box, recommendation) { const wrap = element('div', 'recommendation'); wrap.append(text(element('strong'), 'Deterministic recommendation')); if (recommendation.meaningfulAlternativeId) wrap.append(text(element('p', 'meta'), `Alternative: ${recommendation.meaningfulAlternativeId}`)); const list = element('ol', 'candidate-list'); for (const candidate of recommendation.candidates) list.append(text(element('li'), `${candidate.displayName} · ${candidate.travelMinutes} min travel · ${candidate.evidenceStrength} evidence`)); wrap.append(list); box.append(wrap); }
+function renderStation(room) { const box = $('station-status'); box.replaceChildren(); const station = room.stations.find((candidate) => candidate.id === state.selectedStationId); if (!station) return box.append(text(element('p', 'empty'), 'Select a station.')); box.append(text(element('p', 'meta'), `${station.displayName} · ${station.floorId} · ${stationStatus(room, station)}`)); const issue = activeIssueForStation(room, station.id); if (!issue) return box.append(text(element('p', 'empty'), 'No active work at this station.')); box.append(text(element('p', 'issue-title'), `${issue.id} · ${issue.class}`), text(element('span', `priority ${issue.priority.band}`), `${issue.priority.band} · ${issue.priority.score}`), text(element('p', 'meta'), `Raised ${new Date(issue.raisedAt).toLocaleString()} · ${issue.status}`)); const pending = room.offers.find((offer) => offer.issueId === issue.id && offer.status === 'PENDING'); if (pending) renderOffer(box, room, pending); else if (issue.status === 'PENDING') box.append(text(element('p', 'meta'), 'Pending dispatch. Use “Offer next issue” to create an offer.')); else if (issue.status === 'ASSIGNED') { const assignment = room.assignments.find((candidate) => candidate.issueId === issue.id && candidate.status === 'ACTIVE'); const responder = room.responders.find((candidate) => candidate.id === assignment?.responderId); box.append(text(element('p', 'recommendation'), `Assigned to ${responder?.displayName || assignment?.responderId || 'unknown responder'}.`)); } if (state.lastRecommendation?.issueId === issue.id) renderRecommendation(box, state.lastRecommendation); }
+function renderRecommendation(box, recommendation) { const wrap = element('div', 'recommendation'); const source = recommendation.source === 'PROVIDER' ? `${recommendation.provider || 'Provider'} recommendation` : 'Deterministic fallback'; wrap.append(text(element('strong'), source)); if (recommendation.explanation) wrap.append(text(element('p', 'meta'), recommendation.explanation)); if (recommendation.uncertainty) wrap.append(text(element('p', 'meta'), `Uncertainty: ${recommendation.uncertainty}`)); if (recommendation.meaningfulAlternativeId) wrap.append(text(element('p', 'meta'), `Alternative: ${recommendation.meaningfulAlternativeId}`)); const list = element('ol', 'candidate-list'); for (const candidate of recommendation.candidates) list.append(text(element('li'), `${candidate.displayName} · ${candidate.travelMinutes} min travel · ${candidate.evidenceStrength} evidence`)); wrap.append(list); box.append(wrap); }
 function renderOffer(box, room, offer) { const responder = room.responders.find((candidate) => candidate.id === offer.responderId); const wrap = element('div', 'offer'); wrap.append(text(element('strong'), `Offer pending: ${responder?.displayName || offer.responderId}`), text(element('p', 'meta'), 'Assignment occurs only after acceptance.')); const actions = element('div', 'offer-actions'); actions.append(actionButton('Accept offer', () => mutate(`/offers/${encodeURIComponent(offer.id)}/accept`, {}), 'primary'), actionButton('Reject offer', () => mutate(`/offers/${encodeURIComponent(offer.id)}/reject`, {}), 'danger')); const available = room.responders.filter((candidate) => candidate.dutyStatus === 'AVAILABLE'); if (available.length) { const override = element('div', 'override'); const select = element('select'); for (const candidate of available) { const option = element('option'); option.value = candidate.id; option.textContent = `Override to ${candidate.displayName}`; select.append(option); } override.append(select, actionButton('Override', () => mutate(`/offers/${encodeURIComponent(offer.id)}/override`, { responderId: select.value }))); wrap.append(actions, override); } else wrap.append(actions); box.append(wrap); }
 function actionButton(label, onClick, className = '') { const button = text(element('button', className), label); button.type = 'button'; button.disabled = state.busy; button.addEventListener('click', onClick); return button; }
 function renderEvents(room) { const list = $('events'); list.replaceChildren(); for (const event of [...room.events].reverse().slice(0, 25)) { const item = element('li'); item.append(text(element('span', 'event-type'), event.type.replaceAll('_', ' ')), text(element('span', 'event-time'), new Date(event.occurredAt).toLocaleString())); list.append(item); } }
@@ -117,6 +117,93 @@ async function providerAction(providerId, action) {
     renderProviderSettings();
   }
 }
+function statCard(title, primary, details) {
+  const card = element('div', 'stat-card');
+  card.append(text(element('p', 'eyebrow'), title), text(element('p', 'stat-primary'), primary));
+  for (const d of details) card.append(text(element('p', 'stat-detail'), d));
+  return card;
+}
+function renderAnalytics(room) {
+  const container = $('analytics-content');
+  if (!container || state.activePage !== 'analytics') return;
+  container.replaceChildren();
+  const active = room.issues.filter((i) => ACTIVE_ISSUE_STATUSES.has(i.status));
+  const resolved = room.issues.filter((i) => i.status === 'RESOLVED');
+  const byStatus = {};
+  for (const i of room.issues) byStatus[i.status] = (byStatus[i.status] || 0) + 1;
+  const byBand = { CRITICAL: 0, HIGH: 0, STANDARD: 0 };
+  for (const i of active) byBand[i.priority.band] = (byBand[i.priority.band] || 0) + 1;
+  const byDuty = {};
+  for (const r of room.responders) byDuty[r.dutyStatus] = (byDuty[r.dutyStatus] || 0) + 1;
+  const byClass = {};
+  for (const i of room.issues) byClass[i.class] = (byClass[i.class] || 0) + 1;
+  let mttr = null;
+  if (resolved.length > 0) { const total = resolved.reduce((s, i) => s + (Date.parse(i.resolvedAt) - Date.parse(i.raisedAt)), 0); mttr = Math.round(total / resolved.length / 60_000); }
+  const stationCounts = {};
+  for (const i of room.issues) stationCounts[i.stationId] = (stationCounts[i.stationId] || 0) + 1;
+  const hotspots = Object.entries(stationCounts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id, count]) => ({ station: room.stations.find((s) => s.id === id), count }));
+  const openByAge = [...active].sort((a, b) => a.raisedAt.localeCompare(b.raisedAt));
+  // Header
+  const hdr = element('div', 'analytics-header');
+  hdr.append(text(element('h2'), `${room.displayName} — Analytics`), text(element('p', 'meta'), `Simulated ${new Date(room.simulatedAt).toLocaleString()} · ${room.issues.length} total issues · revision ${room.revision}`));
+  container.append(hdr);
+  // Stat cards
+  const cards = element('div', 'stat-cards');
+  const statusOrder = ['PENDING', 'OFFER_PENDING', 'ASSIGNED', 'REOPENED', 'RESOLVED'];
+  cards.append(
+    statCard('Issue Queue', String(room.issues.length), statusOrder.filter((s) => byStatus[s]).map((s) => `${byStatus[s]} ${s.replaceAll('_', ' ')}`)),
+    statCard('Active Priority', String(active.length), ['CRITICAL', 'HIGH', 'STANDARD'].map((b) => `${byBand[b]} ${b}`)),
+    statCard('Team Status', `${room.responders.filter((r) => r.dutyStatus !== 'OFF_SHIFT').length} on duty`, ['AVAILABLE', 'OFFERED', 'ASSIGNED', 'OFF_SHIFT'].map((d) => `${byDuty[d] || 0} ${d.replaceAll('_', ' ')}`)),
+    statCard('Resolution Time', mttr !== null ? `${mttr} min avg` : '—', mttr !== null ? [`${resolved.length} resolved`, 'Simulated minutes'] : ['No resolved issues yet']),
+  );
+  container.append(cards);
+  // Two-column: class distribution + hotspots
+  const twoCol = element('div', 'analytics-two-col');
+  const classSection = element('div', 'analytics-panel');
+  classSection.append(text(element('p', 'eyebrow'), 'Issue class distribution'));
+  const classMax = Math.max(1, ...Object.values(byClass));
+  const classChart = element('div', 'class-chart');
+  for (const cls of ['MECHANICAL', 'ELECTRICAL', 'CALIBRATION', 'MATERIAL_FEED', 'SOFTWARE']) {
+    const count = byClass[cls] || 0;
+    const row = element('div', 'bar-row');
+    const bar = element('div', 'bar');
+    bar.style.setProperty('--bar-pct', `${Math.round((count / classMax) * 100)}%`);
+    row.append(text(element('span', 'bar-label'), cls.replace('_', ' ')), bar, text(element('span', 'bar-count'), String(count)));
+    classChart.append(row);
+  }
+  classSection.append(classChart);
+  twoCol.append(classSection);
+  const hotSection = element('div', 'analytics-panel');
+  hotSection.append(text(element('p', 'eyebrow'), 'Station hotspots'));
+  if (!hotspots.length) { hotSection.append(text(element('p', 'empty'), 'No issue data yet.')); }
+  else {
+    const table = element('table', 'hotspot-table');
+    const thead = element('thead'); thead.innerHTML = '<tr><th>Station</th><th>Floor</th><th>Issues</th></tr>';
+    const tbody = element('tbody');
+    for (const { station, count } of hotspots) { const tr = element('tr'); tr.append(text(element('td'), station?.displayName || '—'), text(element('td', 'meta'), station?.floorId || '—'), text(element('td', 'count'), String(count))); tbody.append(tr); }
+    table.append(thead, tbody); hotSection.append(table);
+  }
+  twoCol.append(hotSection);
+  container.append(twoCol);
+  // Open issue age table
+  const ageSection = element('div', 'analytics-panel analytics-full');
+  ageSection.append(text(element('p', 'eyebrow'), `Open issues by age (${openByAge.length})`));
+  if (!openByAge.length) { ageSection.append(text(element('p', 'empty'), 'No open issues.')); }
+  else {
+    const table = element('table', 'age-table');
+    const thead = element('thead'); thead.innerHTML = '<tr><th>Issue</th><th>Class</th><th>Priority</th><th>Status</th><th>Station</th><th>Raised (simulated)</th></tr>';
+    const tbody = element('tbody');
+    for (const issue of openByAge) {
+      const station = room.stations.find((s) => s.id === issue.stationId);
+      const tr = element('tr');
+      const priCell = element('td'); priCell.innerHTML = `<span class="priority ${issue.priority.band}">${issue.priority.band}</span>`;
+      tr.append(text(element('td', 'mono'), issue.id), text(element('td'), issue.class.replace('_', ' ')), priCell, text(element('td', 'meta'), issue.status.replaceAll('_', ' ')), text(element('td', 'meta'), station?.displayName || issue.stationId), text(element('td', 'meta'), new Date(issue.raisedAt).toLocaleString()));
+      tbody.append(tr);
+    }
+    table.append(thead, tbody); ageSection.append(table);
+  }
+  container.append(ageSection);
+}
 async function mutate(path, extra) {
   if (state.busy || !state.room) return;
   state.busy = true;
@@ -159,7 +246,7 @@ for (const button of document.querySelectorAll('[data-provider-action]')) {
   button.addEventListener('click', () => providerAction(button.dataset.provider, button.dataset.providerAction));
 }
 for (const tab of document.querySelectorAll('.primary-tab')) {
-  tab.addEventListener('click', () => selectPage(tab.dataset.page));
+  tab.addEventListener('click', () => { selectPage(tab.dataset.page, true); if (state.room) renderAnalytics(state.room); });
   tab.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();

@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/http/server.js';
 import type { ProviderSettingsStore } from '../src/providers/settingsStore.js';
+import type { InferenceClient } from '../src/providers/inference.js';
 import { DEFAULT_ROOM_SPECS } from '../src/seed/seed.js';
 import { DataPaths } from '../src/store/paths.js';
 import { RoomRegistry } from '../src/store/registry.js';
@@ -30,8 +31,9 @@ export async function startApp(
   dataRoot: string,
   providerSettings?: ProviderSettingsStore,
   log: (line: Record<string, string | number>) => void = () => undefined,
+  options: { providersEnabled?: boolean; inferenceClient?: InferenceClient } = {},
 ): Promise<TestApp> {
-  const config = { ...loadConfig({}), dataRoot, port: 0, providersEnabled: false };
+  const config = { ...loadConfig({}), dataRoot, port: 0, providersEnabled: options.providersEnabled ?? false };
   const paths = new DataPaths(dataRoot);
   await RoomRegistry.seedIfEmpty(paths, DEFAULT_ROOM_SPECS);
   const registry = await RoomRegistry.open(paths);
@@ -41,6 +43,7 @@ export async function startApp(
     registry,
     log,
     ...(providerSettings === undefined ? {} : { providerSettings }),
+    ...(options.inferenceClient === undefined ? {} : { inferenceClient: options.inferenceClient }),
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
