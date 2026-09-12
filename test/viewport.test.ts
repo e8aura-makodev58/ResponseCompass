@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { coordinateBounds, fanOutResponders, normalizePoint, placeLabels, projectPoint } from '../static/projection.js';
+import { coordinateBounds, fanOutResponders, layoutResponders, normalizePoint, placeLabels, projectPoint, stationFocus } from '../static/projection.js';
+import { canStartViewportPan, viewportFit, viewportShortcut } from '../static/viewport-controls.js';
 
 describe('floor viewport geometry', () => {
   it('projects fixed normalized coordinates deterministically with stable depth', () => {
@@ -34,6 +35,12 @@ describe('floor viewport geometry', () => {
     assert.deepEqual(placements, placeLabels(inputs, { width: 200, height: 300, upperLanes: 1 }));
   });
 
+  it('uses the full usable upper height by default before placing below', () => {
+    const inputs = Array.from({ length: 7 }, (_, index) => ({ id: `upper-${index}`, anchor: { x: 56, y: 300 }, width: 100, height: 20 }));
+    const placements = placeLabels(inputs, { width: 112, height: 360, laneGap: 10 });
+    assert.ok(placements.every((item) => !item.hidden && item.side === 'above'));
+  });
+
   it('places a dense shared-anchor set deterministically without overlap', () => {
     const inputs = Array.from({ length: 30 }, (_, index) => ({ id: `dense-${index.toString().padStart(2, '0')}`, anchor: { x: 500, y: 300 }, width: 112, height: 38 }));
     const placements = placeLabels(inputs);
@@ -59,5 +66,52 @@ describe('floor viewport geometry', () => {
     const first = fanOutResponders(responders);
     assert.deepEqual(first, fanOutResponders([...responders].reverse()));
     assert.equal(new Set(first.map((person) => `${person.offsetX.toFixed(3)}:${person.offsetY.toFixed(3)}`)).size, 3);
+  });
+
+  it('places active assignees beside their equipment and excludes off-shift personnel', () => {
+    const room = {
+      stations: [{ id: 'S-1', floorId: 'floor-1', x: 10, y: 20 }, { id: 'S-2', floorId: 'floor-2', x: 70, y: 80 }],
+      issues: [{ id: 'I-1', stationId: 'S-1' }],
+      assignments: [{ responderId: 'R-1', issueId: 'I-1', status: 'ACTIVE' }, { responderId: 'R-2', issueId: 'I-1', status: 'ACTIVE' }],
+      responders: [
+        { id: 'R-2', dutyStatus: 'ASSIGNED', publicLocation: { floorId: 'floor-2', x: 0, y: 0 } },
+        { id: 'R-1', dutyStatus: 'ASSIGNED', publicLocation: { floorId: 'floor-2', x: 0, y: 0 } },
+        { id: 'R-3', dutyStatus: 'OFF_SHIFT', publicLocation: { floorId: 'floor-1', x: 10, y: 20 } },
+        { id: 'R-4', dutyStatus: 'AVAILABLE', publicLocation: { floorId: 'floor-2', x: 70, y: 80 } },
+      ],
+    };
+    const people = layoutResponders(room);
+    assert.deepEqual(people.map((person) => person.id), ['R-1', 'R-2', 'R-4']);
+    const assigned = people.filter((person) => person.assigned);
+    assert.ok(assigned.every((person) => person.floorId === 'floor-1' && person.x === 10 && person.y === 20));
+    assert.equal(new Set(assigned.map((person) => `${person.offsetX}:${person.offsetY}`)).size, 2);
+    assert.equal(people.find((person) => person.id === 'R-4')?.floorId, 'floor-2');
+  });
+
+  it('resolves station focus to the correct floor and projected anchor', () => {
+    const stations = [{ id: 'A', floorId: 'floor-1', x: 0, y: 0 }, { id: 'B', floorId: 'floor-2', x: 10, y: 30 }, { id: 'C', floorId: 'floor-2', x: 30, y: 10 }];
+    const target = stationFocus(stations, 'B');
+    assert.equal(target?.floorId, 'floor-2');
+    assert.equal(target?.stationId, 'B');
+    assert.ok(Number.isFinite(target?.sx));
+    assert.equal(stationFocus(stations, 'missing'), null);
+  });
+});
+
+describe('floor viewport interaction policy', () => {
+  it('requires Space plus a primary mouse drag on empty map space', () => {
+    assert.equal(canStartViewportPan({ button: 0, pointerType: 'mouse', spacePressed: true, overControl: false }), true);
+    assert.equal(canStartViewportPan({ button: 0, pointerType: 'mouse', spacePressed: false, overControl: false }), false);
+    assert.equal(canStartViewportPan({ button: 0, pointerType: 'touch', spacePressed: true, overControl: false }), false);
+    assert.equal(canStartViewportPan({ button: 0, pointerType: 'mouse', spacePressed: true, overControl: true }), false);
+    assert.equal(canStartViewportPan({ button: 2, pointerType: 'mouse', spacePressed: true, overControl: false }), false);
+  });
+
+  it('supports only explicit keyboard zoom shortcuts and responsive fitting', () => {
+    assert.deepEqual(viewportShortcut('+'), { type: 'zoom', delta: .25 });
+    assert.deepEqual(viewportShortcut('-'), { type: 'zoom', delta: -.25 });
+    assert.equal(viewportShortcut('ArrowLeft'), null);
+    assert.ok(viewportFit(700, 400) < 1);
+    assert.equal(viewportFit(1400, 900), 1);
   });
 });

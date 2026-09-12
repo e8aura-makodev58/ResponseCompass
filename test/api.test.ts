@@ -42,6 +42,7 @@ describe('room API contract', () => {
     assert.match(page, /id="floor-picker"/);
     assert.match(page, /id="tab-personnel"/);
     assert.match(page, /id="reset-focus"/);
+    assert.match(page, /id="floor-search"/);
     assert.match(page, /id="floor-viewport"[^>]+tabindex="0"/);
     assert.match(page, /src="\/app\.js"/);
 
@@ -49,6 +50,19 @@ describe('room API contract', () => {
     assert.equal(projection.status, 200);
     assert.match(projection.headers.get('content-type') || '', /javascript/);
     assert.match(await projection.text(), /export function placeLabels/);
+
+    const controls = await fetch(`${app.baseUrl}/viewport-controls.js`);
+    assert.equal(controls.status, 200);
+    assert.match(await controls.text(), /export function canStartViewportPan/);
+
+    const browser = await fetch(`${app.baseUrl}/app.js`).then((result) => result.text());
+    assert.match(browser, /event\.code !== 'Space'/);
+    assert.doesNotMatch(browser, /addEventListener\(['"]wheel/);
+
+    const styles = await fetch(`${app.baseUrl}/app.css`).then((result) => result.text());
+    assert.match(styles, /touch-action:\s*pan-y pinch-zoom/);
+    assert.match(styles, /height:\s*clamp\(/);
+    assert.match(styles, /min-width:\s*1200px/);
   });
 
   it('returns 404 for an unknown room and 404 for an unknown endpoint', async () => {

@@ -64,7 +64,7 @@ function horizontalCandidates(item, width, edge, gap) {
 export function placeLabels(items, options = {}) {
   const width = options.width || 1000;
   const height = options.height || 520;
-  const upperLanes = options.upperLanes || 5;
+  const upperLanes = options.upperLanes ?? items.length + 6;
   const laneGap = options.laneGap || 10;
   const edge = options.edge || 6;
   const placed = [];
@@ -134,10 +134,10 @@ export function placeLabels(items, options = {}) {
 }
 
 /** Stable id sorting prevents personnel at one public coordinate from stacking. */
-export function fanOutResponders(responders, radius = 16) {
+export function fanOutResponders(responders, radius = 28) {
   const groups = new Map();
   for (const responder of responders) {
-    const key = `${Number(responder.x).toFixed(3)}:${Number(responder.y).toFixed(3)}`;
+    const key = `${responder.floorId || ''}:${Number(responder.x).toFixed(3)}:${Number(responder.y).toFixed(3)}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(responder);
   }
@@ -150,4 +150,27 @@ export function fanOutResponders(responders, radius = 16) {
     });
   }
   return result.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+
+/** Resolve public event-snapshot locations; active assignments anchor beside equipment. */
+export function layoutResponders(room) {
+  const issues = new Map(room.issues.map((issue) => [issue.id, issue]));
+  const stations = new Map(room.stations.map((station) => [station.id, station]));
+  const assignments = new Map(room.assignments.filter((assignment) => assignment.status === 'ACTIVE').map((assignment) => [assignment.responderId, assignment]));
+  const visible = room.responders.filter((person) => person.dutyStatus !== 'OFF_SHIFT').map((person) => {
+    const assignment = assignments.get(person.id);
+    const assignedStation = assignment ? stations.get(issues.get(assignment.issueId)?.stationId) : null;
+    const location = assignedStation || person.publicLocation;
+    return { ...person, floorId: location.floorId, x: location.x, y: location.y, assigned: Boolean(assignedStation) };
+  });
+  return fanOutResponders(visible, 28);
+}
+
+/** Compute the selected station's stable projected anchor and floor. */
+export function stationFocus(stations, stationId) {
+  const station = stations.find((candidate) => candidate.id === stationId);
+  if (!station) return null;
+  const floorStations = stations.filter((candidate) => candidate.floorId === station.floorId);
+  const point = projectPoint(normalizePoint(station, coordinateBounds(floorStations)));
+  return { floorId: station.floorId, stationId: station.id, ...point };
 }

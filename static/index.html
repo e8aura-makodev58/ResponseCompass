@@ -63,14 +63,20 @@
             <div class="floor-toolbar">
               <label for="floor-picker">Floor</label>
               <select id="floor-picker" aria-label="Floor"></select>
+              <form id="floor-search" class="floor-search" role="search">
+                <label for="floor-search-input">Find</label>
+                <input id="floor-search-input" type="search" list="floor-search-options" autocomplete="off" placeholder="Station, issue, or person">
+                <datalist id="floor-search-options"></datalist>
+                <button type="submit">Focus</button>
+              </form>
               <div class="zoom-controls" aria-label="Viewport zoom">
-                <button id="zoom-out" type="button">−</button>
-                <span id="zoom-label">100%</span>
-                <button id="zoom-in" type="button">+</button>
+                <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+                <output id="zoom-label" aria-live="polite">100%</output>
+                <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
                 <button id="reset-focus" type="button">Reset focus</button>
               </div>
             </div>
-            <p id="floor-help" class="help">Drag empty floor space to pan. Focus the viewport and use arrow keys to pan or +/− to zoom. The ordinary mouse wheel remains page navigation.</p>
+            <p id="floor-help" class="help">Hold Space and drag empty map space with a mouse to pan. Use +/− to zoom. Mouse-wheel and touch gestures continue normal page navigation.</p>
             <div id="floor-viewport" class="floor-viewport" tabindex="0" aria-describedby="floor-help" aria-label="Interactive manufacturing floor viewport"></div>
             <div class="floor-tabs" role="tablist" aria-label="Floor lists">
               <button id="tab-stations" type="button" role="tab" aria-controls="floor-list">Stations</button>

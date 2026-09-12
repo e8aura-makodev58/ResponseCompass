@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "static/projection.js"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "static/*.js"]
 }
