@@ -27,6 +27,11 @@ describe('room API contract', () => {
     assert.equal(response.status, 200);
     const page = await response.text();
     assert.match(page, /Response Compass/);
+    assert.match(page, /id="nav-production-floor"/);
+    assert.match(page, /id="nav-analytics"/);
+    assert.match(page, /id="nav-settings"/);
+    assert.match(page, /Canonical operational metrics and drill-downs/);
+    assert.match(page, /Deployment-global API configuration/);
     assert.match(page, /id="floor-picker"/);
     assert.match(page, /id="tab-personnel"/);
     assert.match(page, /id="reset-focus"/);
