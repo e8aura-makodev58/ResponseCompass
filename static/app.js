@@ -160,7 +160,7 @@ $('force-resolve').addEventListener('click', () => {
   if (assignment) mutate(`/assignments/${encodeURIComponent(assignment.id)}/resolve`, {});
 });
 for (const tab of document.querySelectorAll('.primary-tab')) {
-  tab.addEventListener('click', () => selectPage(tab.dataset.page));
+  tab.addEventListener('click', () => { selectPage(tab.dataset.page, true); if (state.room) renderAnalytics(state.room); });
   tab.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
