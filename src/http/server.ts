@@ -11,6 +11,8 @@ import {
   overrideOffer,
   rejectOffer,
 } from '../domain/dispatch.js';
+import { pauseClock, resumeClock, triggerNextEvent } from '../domain/clock.js';
+import { resolveAssignment } from '../domain/lifecycle.js';
 import type { AppConfig } from '../config.js';
 import type { RoomEntry, RoomRegistry } from '../store/registry.js';
 import { StaleRevisionError } from '../store/roomStore.js';
@@ -167,6 +169,52 @@ async function handle(
       });
     }
     throw new ApiError('NOT_FOUND', 'Unknown offer action.');
+  }
+
+  // POST /api/rooms/:roomId/pause
+  if (segments.length === 4 && segments[3] === 'pause') {
+    requireMethod(method, ['POST']);
+    const entry = requireReadyRoom(registry, roomId);
+    const body = await readJsonBody(req);
+    const expectedRevision = readExpectedRevision(body);
+    const updated = await entry.store.mutate(expectedRevision, (draft) => { pauseClock(draft); });
+    return sendJson(res, 200, { room: projectRoomState(updated) });
+  }
+
+  // POST /api/rooms/:roomId/resume
+  if (segments.length === 4 && segments[3] === 'resume') {
+    requireMethod(method, ['POST']);
+    const entry = requireReadyRoom(registry, roomId);
+    const body = await readJsonBody(req);
+    const expectedRevision = readExpectedRevision(body);
+    const updated = await entry.store.mutate(expectedRevision, (draft) => { resumeClock(draft); });
+    return sendJson(res, 200, { room: projectRoomState(updated) });
+  }
+
+  // POST /api/rooms/:roomId/trigger
+  if (segments.length === 4 && segments[3] === 'trigger') {
+    requireMethod(method, ['POST']);
+    const entry = requireReadyRoom(registry, roomId);
+    const body = await readJsonBody(req);
+    const expectedRevision = readExpectedRevision(body);
+    const updated = await entry.store.mutateWithHidden(expectedRevision, (draft, hiddenDraft) => {
+      triggerNextEvent(draft, hiddenDraft);
+    });
+    return sendJson(res, 200, { room: projectRoomState(updated) });
+  }
+
+  // POST /api/rooms/:roomId/assignments/:assignmentId/resolve
+  if (segments.length === 6 && segments[3] === 'assignments' && segments[5] === 'resolve') {
+    requireMethod(method, ['POST']);
+    const assignmentId = segments[4] as string;
+    const entry = requireReadyRoom(registry, roomId);
+    const body = await readJsonBody(req);
+    const expectedRevision = readExpectedRevision(body);
+    let assignment;
+    const updated = await entry.store.mutate(expectedRevision, (draft) => {
+      assignment = resolveAssignment(draft, assignmentId);
+    });
+    return sendJson(res, 200, { room: projectRoomState(updated), assignment });
   }
 
   throw new ApiError('NOT_FOUND', 'Unknown endpoint.');

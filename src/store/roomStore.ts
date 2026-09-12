@@ -75,6 +75,34 @@ export class RoomStore {
     });
   }
 
+  /**
+   * Like `mutate`, but also reads and atomically writes hidden truth so that the
+   * RNG cursor (and any future hidden fields) survive restart without a separate
+   * write outside the room lock.
+   */
+  async mutateWithHidden(
+    expectedRevision: number | undefined,
+    apply: (draft: RoomState, hiddenDraft: HiddenRoomTruth) => void | Promise<void>,
+  ): Promise<RoomState> {
+    return this.enqueue(async () => {
+      const current = await this.read();
+      if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+        throw new StaleRevisionError(expectedRevision, current.revision);
+      }
+      const hidden = await this.readHiddenTruth();
+
+      const draft = structuredClone(current);
+      const hiddenDraft = structuredClone(hidden);
+      await apply(draft, hiddenDraft);
+      draft.revision = current.revision + 1;
+
+      await writeJsonAtomic(this.paths.roomStateFile(this.roomId), draft);
+      await writeJsonAtomic(this.paths.roomHiddenFile(this.roomId), hiddenDraft);
+      this.cached = draft;
+      return draft;
+    });
+  }
+
   /** Server-only. Callers must not place this on a public payload. */
   async readHiddenTruth(): Promise<HiddenRoomTruth> {
     const raw = await readFile(this.paths.roomHiddenFile(this.roomId), 'utf8');
