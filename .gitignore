@@ -4,3 +4,5 @@ data/
 *.log
 .env
 .env.*
+plant*-simulation-seed.json
+!plant1-simulation-seed.json
