@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
+import { acceptOffer, createNextOffer } from '../src/domain/dispatch.js';
+import { resolveAssignment } from '../src/domain/lifecycle.js';
+import { seedRoom } from '../src/seed/seed.js';
 import { getJson, makeDataRoot, postJson, removeDataRoot, startApp, type TestApp } from './helpers.js';
 
 describe('simulation clock and issue lifecycle', () => {
@@ -158,7 +161,7 @@ describe('simulation clock and issue lifecycle', () => {
 
   // ── Assignment resolution ──────────────────────────────────────────────────
 
-  it('resolves an active assignment: issue RESOLVED, responder AVAILABLE, station NORMAL', async () => {
+  it('forces one deterministic outcome through the normal resolution engine', async () => {
     // Set up: create an offer and accept it to get an active assignment.
     const r0 = await room('plant-1');
     const offered = await postJson(`${app.baseUrl}/api/rooms/plant-1/offers`, {
@@ -181,10 +184,18 @@ describe('simulation clock and issue lifecycle', () => {
     assert.equal(resolved.status, 200);
     assert.equal(resolved.body.assignment.status, 'RELEASED');
     assert.ok(resolved.body.assignment.releasedAt);
+    assert.ok(['RESOLVED', 'REOPENED'].includes(resolved.body.outcome.status));
+    assert.equal(resolved.body.outcome.assignmentId, assignmentId);
+    assert.ok(resolved.body.outcome.durationMinutes > 0);
+    assert.doesNotMatch(
+      JSON.stringify(resolved.body),
+      /trueMedianMinutes|trueSuccessProbability|randomStream|skills/,
+    );
 
     const resolvedIssue = resolved.body.room.issues.find((i: any) => i.id === accepted.body.offer.issueId);
-    assert.equal(resolvedIssue?.status, 'RESOLVED');
-    assert.ok(resolvedIssue?.resolvedAt);
+    assert.equal(resolvedIssue?.status, resolved.body.outcome.status);
+    if (resolved.body.outcome.success) assert.ok(resolvedIssue?.resolvedAt);
+    else assert.equal(resolvedIssue?.resolvedAt, null);
 
     const responderAfter = resolved.body.room.responders.find((r: any) => r.id === accepted.body.offer.responderId);
     assert.equal(responderAfter?.dutyStatus, 'AVAILABLE');
@@ -194,15 +205,15 @@ describe('simulation clock and issue lifecycle', () => {
     // Station is NORMAL if no other active issues remain.
     assert.ok(['NORMAL', 'ISSUE_ACTIVE'].includes(stationAfter?.status));
 
-    assert.ok(resolved.body.room.events.some((e: any) => e.type === 'ISSUE_RESOLVED'));
-    assert.ok(resolved.body.room.events.some((e: any) => e.type === 'RESPONDER_MOVED' && e.publicPayload.reason === 'RESOLVED'));
-    assert.ok(resolved.body.room.audits.some((a: any) => a.action === 'ISSUE_RESOLVED'));
+    assert.ok(resolved.body.room.events.some((e: any) => e.type === 'RESOLUTION_ATTEMPT_COMPLETED'));
+    assert.ok(resolved.body.room.events.some((e: any) => e.type === `ISSUE_${resolved.body.outcome.status}`));
+    assert.ok(resolved.body.room.audits.some((a: any) => a.action === `ISSUE_${resolved.body.outcome.status}`));
   });
 
   it('resolving an already-released assignment returns 409', async () => {
     const current = await room('plant-1');
     const released = current.body.room.assignments.find((a: any) => a.status === 'RELEASED');
-    if (released === undefined) return; // nothing to test if no released assignment yet
+    assert.ok(released, 'the preceding resolution must leave a released assignment');
 
     const r = await postJson(
       `${app.baseUrl}/api/rooms/plant-1/assignments/${released.id}/resolve`,
@@ -223,9 +234,18 @@ describe('simulation clock and issue lifecycle', () => {
   });
 
   it('resolve with stale revision returns 409 and leaves state unchanged', async () => {
-    const current = await room('plant-1');
+    const beforeOffer = await room('plant-1');
+    const offered = await postJson(`${app.baseUrl}/api/rooms/plant-1/offers`, {
+      expectedRevision: beforeOffer.body.room.revision,
+    });
+    assert.equal(offered.status, 201);
+    const current = await postJson(
+      `${app.baseUrl}/api/rooms/plant-1/offers/${offered.body.offer.id}/accept`,
+      { expectedRevision: offered.body.room.revision },
+    );
+    assert.equal(current.status, 200);
     const active = current.body.room.assignments.find((a: any) => a.status === 'ACTIVE');
-    if (active === undefined) return; // skip if no active assignment at this point
+    assert.ok(active, 'test setup must create an active assignment');
 
     const r = await postJson(
       `${app.baseUrl}/api/rooms/plant-1/assignments/${active.id}/resolve`,
@@ -236,5 +256,56 @@ describe('simulation clock and issue lifecycle', () => {
 
     const after = await room('plant-1');
     assert.equal(after.body.room.revision, current.body.room.revision, 'revision must not advance on stale resolve');
+  });
+});
+
+describe('deterministic resolution outcomes', () => {
+  function assignedRoom(roomId: string, successProbability: number) {
+    const seeded = seedRoom({
+      roomId,
+      displayName: roomId,
+      openIssueStations: [0],
+    });
+    const created = createNextOffer(seeded.state);
+    acceptOffer(seeded.state, created.offer.id);
+    const assignment = seeded.state.assignments.find((candidate) => candidate.status === 'ACTIVE');
+    assert.ok(assignment);
+    const issue = seeded.state.issues.find((candidate) => candidate.id === assignment.issueId);
+    assert.ok(issue);
+    const skill = seeded.hidden.skills[assignment.responderId]?.[issue.class];
+    assert.ok(skill);
+    skill.trueSuccessProbability = successProbability;
+    return { ...seeded, assignment, issue, originalRaisedAt: issue.raisedAt };
+  }
+
+  it('records a successful observed outcome without exposing hidden probability', () => {
+    const seeded = assignedRoom('outcome-success', 1);
+    const cursorBefore = seeded.hidden.randomStream.cursor;
+    const result = resolveAssignment(seeded.state, seeded.hidden, seeded.assignment.id);
+
+    assert.equal(result.outcome.status, 'RESOLVED');
+    assert.equal(result.outcome.success, true);
+    assert.equal(seeded.issue.status, 'RESOLVED');
+    assert.equal(seeded.hidden.randomStream.cursor, cursorBefore + 2);
+    assert.ok(!JSON.stringify(result.outcome).includes('trueSuccessProbability'));
+  });
+
+  it('reopens a failed attempt with original downtime and returns it to dispatch', () => {
+    const seeded = assignedRoom('outcome-failure', 0);
+    const result = resolveAssignment(seeded.state, seeded.hidden, seeded.assignment.id);
+
+    assert.equal(result.outcome.status, 'REOPENED');
+    assert.equal(result.outcome.success, false);
+    assert.equal(seeded.issue.status, 'REOPENED');
+    assert.equal(seeded.issue.raisedAt, seeded.originalRaisedAt);
+    assert.equal(seeded.issue.resolvedAt, undefined);
+    assert.equal(
+      seeded.state.stations.find((station) => station.id === seeded.issue.stationId)?.status,
+      'ISSUE_ACTIVE',
+    );
+
+    const retry = createNextOffer(seeded.state);
+    assert.equal(retry.offer.issueId, seeded.issue.id);
+    assert.equal(seeded.issue.status, 'OFFER_PENDING');
   });
 });

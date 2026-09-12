@@ -1,12 +1,123 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Response Compass</title><link rel="stylesheet" href="/app.css"></head><body>
-  <header class="topbar"><div><p class="eyebrow">Synthetic manufacturing control room</p><h1>Response Compass</h1></div><div class="header-actions"><label class="room-label" for="room-picker">Control Room</label><select id="room-picker" aria-label="Control Room"></select><span class="mode-badge">Deterministic fallback</span></div></header>
-  <main><p id="status" class="status" role="status" aria-live="polite">Loading Control Rooms…</p><section id="room-summary" class="summary" aria-label="Selected Control Room"></section><div class="layout">
-    <section class="panel floor-panel" aria-labelledby="floor-heading"><div class="panel-heading"><div><p class="eyebrow">Live Floor</p><h2 id="floor-heading">Manufacturing Floor</h2></div><button id="offer-next" class="primary">Offer next issue</button></div>
-      <div class="floor-toolbar"><label for="floor-picker">Floor</label><select id="floor-picker" aria-label="Floor"></select><div class="zoom-controls" aria-label="Viewport zoom"><button id="zoom-out" type="button">−</button><span id="zoom-label">100%</span><button id="zoom-in" type="button">+</button><button id="reset-focus" type="button">Reset focus</button></div></div>
-      <p class="help">Explicit controls keep the synthetic floor stable. Select a station or neutral personnel marker to inspect it.</p><div id="floor-viewport" class="floor-viewport" aria-live="polite"></div>
-      <div class="floor-tabs" role="tablist" aria-label="Floor lists"><button id="tab-stations" type="button" role="tab" aria-controls="floor-list">Stations</button><button id="tab-personnel" type="button" role="tab" aria-controls="floor-list">Shift Personnel</button></div><div id="floor-list" class="floor-list" role="tabpanel"></div>
-    </section>
-    <section class="panel" aria-labelledby="station-heading"><div class="panel-heading"><div><p class="eyebrow">Dispatch</p><h2 id="station-heading">Station Status</h2></div></div><div id="station-status" class="station-status" aria-live="polite"></div></section>
-    <section class="panel events-panel" aria-labelledby="event-heading"><div class="panel-heading"><div><p class="eyebrow">Public-safe audit</p><h2 id="event-heading">Operational Event Feed</h2></div></div><ol id="events" class="events"></ol></section>
-  </div></main><script type="module" src="/app.js"></script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Response Compass</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Synthetic manufacturing control room</p>
+        <h1>Response Compass</h1>
+      </div>
+      <div class="header-actions">
+        <label class="room-label" for="room-picker">Control Room</label>
+        <select id="room-picker" aria-label="Control Room"></select>
+        <span class="mode-badge">Deterministic fallback</span>
+      </div>
+    </header>
+
+    <nav class="primary-nav" aria-label="Application sections">
+      <div class="primary-tabs" role="tablist" aria-label="Response Compass views">
+        <button id="nav-production-floor" class="primary-tab" type="button" role="tab" aria-controls="page-production-floor" data-page="production-floor">
+          Production Floor
+        </button>
+        <button id="nav-analytics" class="primary-tab" type="button" role="tab" aria-controls="page-analytics" data-page="analytics">
+          Analytics
+        </button>
+        <button id="nav-settings" class="primary-tab" type="button" role="tab" aria-controls="page-settings" data-page="settings">
+          Settings
+        </button>
+      </div>
+    </nav>
+
+    <main>
+      <section id="page-production-floor" class="app-page" role="tabpanel" aria-labelledby="nav-production-floor">
+        <p id="status" class="status" role="status" aria-live="polite">Loading Control Rooms…</p>
+        <section id="room-summary" class="summary" aria-label="Selected Control Room"></section>
+        <section class="simulation-bar" aria-label="Simulation controls">
+          <div class="simulation-readout">
+            <p class="eyebrow">Simulation</p>
+            <strong id="simulation-time">—</strong>
+          </div>
+          <div class="simulation-controls">
+            <button id="pause-simulation" type="button" disabled>Pause</button>
+            <button id="resume-simulation" type="button" disabled>Resume</button>
+            <button id="trigger-event" class="primary" type="button" disabled>Trigger next event</button>
+            <button id="force-resolve" type="button" disabled>Force resolve selected</button>
+          </div>
+        </section>
+
+        <div class="layout">
+          <section class="panel floor-panel" aria-labelledby="floor-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Live Floor</p>
+                <h2 id="floor-heading">Manufacturing Floor</h2>
+              </div>
+              <button id="offer-next" class="primary">Offer next issue</button>
+            </div>
+            <div class="floor-toolbar">
+              <label for="floor-picker">Floor</label>
+              <select id="floor-picker" aria-label="Floor"></select>
+              <div class="zoom-controls" aria-label="Viewport zoom">
+                <button id="zoom-out" type="button">−</button>
+                <span id="zoom-label">100%</span>
+                <button id="zoom-in" type="button">+</button>
+                <button id="reset-focus" type="button">Reset focus</button>
+              </div>
+            </div>
+            <p class="help">Explicit controls keep the synthetic floor stable. Select a station or neutral personnel marker to inspect it.</p>
+            <div id="floor-viewport" class="floor-viewport" aria-live="polite"></div>
+            <div class="floor-tabs" role="tablist" aria-label="Floor lists">
+              <button id="tab-stations" type="button" role="tab" aria-controls="floor-list">Stations</button>
+              <button id="tab-personnel" type="button" role="tab" aria-controls="floor-list">Shift Personnel</button>
+            </div>
+            <div id="floor-list" class="floor-list" role="tabpanel"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="station-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Dispatch</p>
+                <h2 id="station-heading">Station Status</h2>
+              </div>
+            </div>
+            <div id="station-status" class="station-status" aria-live="polite"></div>
+          </section>
+
+          <section class="panel events-panel" aria-labelledby="event-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Public-safe audit</p>
+                <h2 id="event-heading">Operational Event Feed</h2>
+              </div>
+            </div>
+            <ol id="events" class="events"></ol>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-analytics" class="app-page placeholder-page" role="tabpanel" aria-labelledby="nav-analytics" hidden>
+        <div class="placeholder-card">
+          <p class="eyebrow">Coming next</p>
+          <h2>Analytics</h2>
+          <p>Canonical operational metrics and drill-downs will appear here once the simulation lifecycle is producing verified outcomes.</p>
+        </div>
+      </section>
+
+      <section id="page-settings" class="app-page placeholder-page" role="tabpanel" aria-labelledby="nav-settings" hidden>
+        <div class="placeholder-card">
+          <p class="eyebrow">Reserved workspace</p>
+          <h2>Settings</h2>
+          <p>Deployment-global API configuration and room-scoped demo controls will be added here in later verified slices.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

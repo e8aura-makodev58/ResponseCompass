@@ -56,10 +56,10 @@ export interface Recommendation {
 
 const BAND_RANK = { CRITICAL: 0, HIGH: 1, STANDARD: 2 } as const;
 
-/** Select one actionable issue deterministically; only pending work is offerable. */
+/** Select one actionable issue deterministically; reopened work re-enters the same queue. */
 export function selectNextIssue(state: RoomState): Issue | undefined {
   return state.issues
-    .filter((issue) => issue.status === 'PENDING')
+    .filter((issue) => issue.status === 'PENDING' || issue.status === 'REOPENED')
     .sort((left, right) => {
       const band = BAND_RANK[left.priority.band] - BAND_RANK[right.priority.band];
       if (band !== 0) return band;

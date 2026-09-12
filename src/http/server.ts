@@ -210,11 +210,15 @@ async function handle(
     const entry = requireReadyRoom(registry, roomId);
     const body = await readJsonBody(req);
     const expectedRevision = readExpectedRevision(body);
-    let assignment;
-    const updated = await entry.store.mutate(expectedRevision, (draft) => {
-      assignment = resolveAssignment(draft, assignmentId);
+    let result: ReturnType<typeof resolveAssignment> | undefined;
+    const updated = await entry.store.mutateWithHidden(expectedRevision, (draft, hiddenDraft) => {
+      result = resolveAssignment(draft, hiddenDraft, assignmentId);
     });
-    return sendJson(res, 200, { room: projectRoomState(updated), assignment });
+    return sendJson(res, 200, {
+      room: projectRoomState(updated),
+      assignment: result!.assignment,
+      outcome: result!.outcome,
+    });
   }
 
   throw new ApiError('NOT_FOUND', 'Unknown endpoint.');

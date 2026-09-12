@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 
 import type { RoomState } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
@@ -14,6 +14,14 @@ export class StaleRevisionError extends Error {
     super(`Stale revision: expected ${expected}, room is at ${actual}`);
     this.name = 'StaleRevisionError';
   }
+}
+
+interface RoomTransaction {
+  schemaVersion: 1;
+  roomId: string;
+  phase: 'PREPARED' | 'COMMITTED';
+  before: { state: RoomState; hidden: HiddenRoomTruth };
+  after: { state: RoomState; hidden: HiddenRoomTruth };
 }
 
 /**
@@ -35,6 +43,7 @@ export class RoomStore {
 
   /** Load and validate from disk, populating the in-process cache. */
   async load(): Promise<RoomState> {
+    await this.recoverTransaction();
     const raw = await readFile(this.paths.roomStateFile(this.roomId), 'utf8');
     const parsed = JSON.parse(raw) as RoomState;
     assertLoadable(parsed, this.roomId);
@@ -76,9 +85,11 @@ export class RoomStore {
   }
 
   /**
-   * Like `mutate`, but also reads and atomically writes hidden truth so that the
-   * RNG cursor (and any future hidden fields) survive restart without a separate
-   * write outside the room lock.
+   * Coordinate a public-state and hidden-truth mutation through a durable
+   * transaction journal. A PREPARED journal rolls back after interruption; a
+   * COMMITTED journal rolls forward. This keeps both canonical files at the
+   * same logical revision even though a filesystem cannot rename two files as
+   * one operation.
    */
   async mutateWithHidden(
     expectedRevision: number | undefined,
@@ -96,9 +107,33 @@ export class RoomStore {
       await apply(draft, hiddenDraft);
       draft.revision = current.revision + 1;
 
-      await writeJsonAtomic(this.paths.roomStateFile(this.roomId), draft);
-      await writeJsonAtomic(this.paths.roomHiddenFile(this.roomId), hiddenDraft);
+      const transaction: RoomTransaction = {
+        schemaVersion: 1,
+        roomId: this.roomId,
+        phase: 'PREPARED',
+        before: { state: current, hidden },
+        after: { state: draft, hidden: hiddenDraft },
+      };
+      const transactionFile = this.paths.roomTransactionFile(this.roomId);
+      await writeJsonAtomic(transactionFile, transaction);
+      try {
+        await writeJsonAtomic(this.paths.roomHiddenFile(this.roomId), hiddenDraft);
+        await writeJsonAtomic(this.paths.roomStateFile(this.roomId), draft);
+        await writeJsonAtomic(transactionFile, { ...transaction, phase: 'COMMITTED' });
+      } catch (error) {
+        this.cached = undefined;
+        try {
+          await this.recoverTransaction();
+        } catch (recoveryError) {
+          throw new AggregateError([error, recoveryError], 'Room transaction failed and could not be recovered.');
+        }
+        throw error;
+      }
+
       this.cached = draft;
+      // A committed journal is safe to replay. Cleanup failure is therefore
+      // non-fatal and the next startup will remove it after rolling forward.
+      await rm(transactionFile, { force: true }).catch(() => undefined);
       return draft;
     });
   }
@@ -109,12 +144,43 @@ export class RoomStore {
     return JSON.parse(raw) as HiddenRoomTruth;
   }
 
+  private async recoverTransaction(): Promise<void> {
+    const transactionFile = this.paths.roomTransactionFile(this.roomId);
+    let transaction: RoomTransaction;
+    try {
+      transaction = JSON.parse(await readFile(transactionFile, 'utf8')) as RoomTransaction;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw new Error(`Room ${this.roomId}: unreadable transaction journal.`, { cause: error });
+    }
+    assertTransaction(transaction, this.roomId);
+    const snapshot = transaction.phase === 'COMMITTED' ? transaction.after : transaction.before;
+    await writeJsonAtomic(this.paths.roomHiddenFile(this.roomId), snapshot.hidden);
+    await writeJsonAtomic(this.paths.roomStateFile(this.roomId), snapshot.state);
+    this.cached = snapshot.state;
+    await rm(transactionFile, { force: true });
+  }
+
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const run = this.queue.then(task, task);
     // Keep the chain alive after a rejection so one failed mutation does not
     // wedge every later mutation for this room.
     this.queue = run.catch(() => undefined);
     return run;
+  }
+}
+
+function assertTransaction(transaction: RoomTransaction, roomId: string): void {
+  if (
+    transaction?.schemaVersion !== 1 ||
+    transaction.roomId !== roomId ||
+    !['PREPARED', 'COMMITTED'].includes(transaction.phase) ||
+    transaction.before?.state?.roomId !== roomId ||
+    transaction.after?.state?.roomId !== roomId ||
+    transaction.before?.hidden?.roomId !== roomId ||
+    transaction.after?.hidden?.roomId !== roomId
+  ) {
+    throw new Error(`Room ${roomId}: invalid transaction journal.`);
   }
 }
 

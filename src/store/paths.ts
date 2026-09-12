@@ -35,4 +35,9 @@ export class DataPaths {
   roomHiddenFile(roomId: string): string {
     return join(this.roomDir(roomId), 'hidden.json');
   }
+
+  /** Server-only crash-recovery journal for coordinated state/hidden writes. */
+  roomTransactionFile(roomId: string): string {
+    return join(this.roomDir(roomId), 'transaction.json');
+  }
 }
