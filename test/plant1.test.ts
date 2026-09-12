@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import { access } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
+import { loadConfig } from '../src/config.js';
 import { projectRoomState } from '../src/domain/projection.js';
 import { importPlant1Seed } from '../src/seed/plant1.js';
+import { DEFAULT_ROOM_SPECS } from '../src/seed/seed.js';
+import { DataPaths } from '../src/store/paths.js';
+import { RoomRegistry } from '../src/store/registry.js';
+import { makeDataRoot, removeDataRoot } from './helpers.js';
 
 function fixture(): unknown {
   return {
@@ -50,6 +56,31 @@ function fixture(): unknown {
 }
 
 describe('Plant 1 simulation seed adapter', () => {
+  it('uses the tracked Plant 1 snapshot as the default empty-root seed', async () => {
+    const seedPath = loadConfig({}).plant1SimulationSeedPath;
+    await access(seedPath);
+    const dataRoot = await makeDataRoot();
+    try {
+      const paths = new DataPaths(dataRoot);
+      assert.equal(
+        await RoomRegistry.seedIfEmpty(paths, DEFAULT_ROOM_SPECS, seedPath),
+        true,
+      );
+      const registry = await RoomRegistry.open(paths);
+      const plant1 = await registry.get('plant-1')!.store.read();
+      assert.equal(plant1.stations.length, 72);
+      assert.equal(plant1.responders.length, 24);
+      assert.equal(plant1.simulatedAt, '2026-09-10T05:20:26.623Z');
+      assert.equal(
+        await RoomRegistry.seedIfEmpty(paths, DEFAULT_ROOM_SPECS, seedPath),
+        false,
+        'a nonempty data root must never be overwritten by the bundled seed',
+      );
+    } finally {
+      await removeDataRoot(dataRoot);
+    }
+  });
+
   it('maps the active public operational snapshot into canonical room state', () => {
     const { state } = importPlant1Seed(fixture());
     assert.equal(state.roomId, 'plant-1');

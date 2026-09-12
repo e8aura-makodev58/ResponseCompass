@@ -10,8 +10,8 @@ export interface AppConfig {
   dataRoot: string;
   /** Providers are disabled for the first deployment; dispatch is deterministic. */
   providersEnabled: boolean;
-  /** Optional external Plant 1 simulator snapshot imported only into an empty data root. */
-  plant1SimulationSeedPath?: string;
+  /** Bundled Plant 1 simulator snapshot imported only into an empty data root. */
+  plant1SimulationSeedPath: string;
 }
 
 function readPort(raw: string | undefined): number {
@@ -29,8 +29,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     host: env['HOST'] ?? '0.0.0.0',
     dataRoot: resolve(env['DATA_ROOT'] ?? './data'),
     providersEnabled: env['PROVIDERS_ENABLED'] === 'true',
-    ...(env['PLANT1_SIMULATION_SEED'] === undefined || env['PLANT1_SIMULATION_SEED'] === ''
-      ? {}
-      : { plant1SimulationSeedPath: resolve(env['PLANT1_SIMULATION_SEED']) }),
+    plant1SimulationSeedPath: resolve(
+      env['PLANT1_SIMULATION_SEED'] || './plant1-simulation-seed.json',
+    ),
   };
 }
