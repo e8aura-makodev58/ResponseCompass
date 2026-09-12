@@ -1,0 +1,22 @@
+{
+  "name": "response-compass",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Manufacturing control-room dispatch agent (synthetic demo).",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "npm run build && npm start",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "typescript": "5.9.3"
+  }
+}

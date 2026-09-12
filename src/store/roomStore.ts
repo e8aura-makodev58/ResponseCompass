@@ -1,0 +1,117 @@
+import { readFile } from 'node:fs/promises';
+
+import type { RoomState } from '../domain/types.js';
+import { SCHEMA_VERSION } from '../domain/types.js';
+import type { HiddenRoomTruth } from '../domain/private.js';
+import { writeJsonAtomic } from './atomic.js';
+import type { DataPaths } from './paths.js';
+
+export class StaleRevisionError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly actual: number,
+  ) {
+    super(`Stale revision: expected ${expected}, room is at ${actual}`);
+    this.name = 'StaleRevisionError';
+  }
+}
+
+/**
+ * Serialized read-modify-write access to one room's persisted state (SOW s3.2).
+ *
+ * Every mutation runs through `queue`, so two concurrent HTTP requests for the
+ * same room cannot interleave a read and a write and lose one of the updates.
+ * Rooms hold independent stores, so a slow write in one room does not block
+ * another.
+ */
+export class RoomStore {
+  private queue: Promise<unknown> = Promise.resolve();
+  private cached: RoomState | undefined;
+
+  constructor(
+    private readonly paths: DataPaths,
+    readonly roomId: string,
+  ) {}
+
+  /** Load and validate from disk, populating the in-process cache. */
+  async load(): Promise<RoomState> {
+    const raw = await readFile(this.paths.roomStateFile(this.roomId), 'utf8');
+    const parsed = JSON.parse(raw) as RoomState;
+    assertLoadable(parsed, this.roomId);
+    this.cached = parsed;
+    return parsed;
+  }
+
+  async read(): Promise<RoomState> {
+    return this.cached ?? (await this.load());
+  }
+
+  /**
+   * Apply a mutation under the room lock.
+   *
+   * `expectedRevision` is checked *inside* the lock: checking it in the request
+   * handler would let a second request pass the check and then queue behind the
+   * first, overwriting it (SOW s3.1).
+   */
+  async mutate(
+    expectedRevision: number | undefined,
+    apply: (draft: RoomState) => void | Promise<void>,
+  ): Promise<RoomState> {
+    return this.enqueue(async () => {
+      const current = await this.read();
+      if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+        throw new StaleRevisionError(expectedRevision, current.revision);
+      }
+
+      // Mutate a copy: if `apply` throws partway through, the cached state is
+      // untouched and the caller's failed action changes nothing.
+      const draft = structuredClone(current);
+      await apply(draft);
+      draft.revision = current.revision + 1;
+
+      await writeJsonAtomic(this.paths.roomStateFile(this.roomId), draft);
+      this.cached = draft;
+      return draft;
+    });
+  }
+
+  /** Server-only. Callers must not place this on a public payload. */
+  async readHiddenTruth(): Promise<HiddenRoomTruth> {
+    const raw = await readFile(this.paths.roomHiddenFile(this.roomId), 'utf8');
+    return JSON.parse(raw) as HiddenRoomTruth;
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    // Keep the chain alive after a rejection so one failed mutation does not
+    // wedge every later mutation for this room.
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+}
+
+function assertLoadable(state: RoomState, roomId: string): void {
+  if (state === null || typeof state !== 'object') {
+    throw new Error(`Room ${roomId}: state is not an object`);
+  }
+  if (state.schemaVersion !== SCHEMA_VERSION) {
+    // Startup reconciliation must not guess at unknown state (SOW s3.2); the
+    // registry isolates this room as FAILED instead.
+    throw new Error(
+      `Room ${roomId}: unsupported schemaVersion ${String(state.schemaVersion)}, expected ${SCHEMA_VERSION}`,
+    );
+  }
+  if (state.roomId !== roomId) {
+    throw new Error(
+      `Room ${roomId}: state declares roomId ${String(state.roomId)}; provenance is ambiguous`,
+    );
+  }
+  if (typeof state.revision !== 'number' || !Number.isInteger(state.revision)) {
+    throw new Error(`Room ${roomId}: revision is not an integer`);
+  }
+  for (const key of ['stations', 'responders', 'issues', 'offers', 'assignments', 'events', 'audits'] as const) {
+    if (!Array.isArray(state[key])) {
+      throw new Error(`Room ${roomId}: ${key} is not an array`);
+    }
+  }
+}
